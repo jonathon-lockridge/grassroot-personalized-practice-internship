@@ -21,5 +21,14 @@ jobs:
           ruff format --check .
       - name: Test
         run: pytest -q
-      - name: Secret scan
-        run: scripts/check_secrets.sh
+      - name: No secrets saved by accident
+        run: |
+          env_files=$(git ls-files | grep -E '(^|/)\.env(\..*)?$' | grep -v '\.env\.example$' || true)
+          if [ -n "$env_files" ]; then
+            echo "A .env file was committed: $env_files. Remove it and change the secrets inside it."
+            exit 1
+          fi
+          if git grep -nIE '(sk-ant-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' -- . ':!.github/workflows/ci.yml'; then
+            echo "Something that looks like a secret was committed. Change it (deleting the line is not enough) and remove it."
+            exit 1
+          fi
