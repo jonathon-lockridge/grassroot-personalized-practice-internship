@@ -1,0 +1,29 @@
+# secrets (real values live only in .env; .env.example has names only)
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# local data and databases
+*.db
+*.sqlite3
+data/exports/
+
+# system and editor files
+.DS_Store
+.vscode/
+.idea/
+
+# logs
+*.log
