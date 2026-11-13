@@ -1,8 +1,8 @@
-# PRD: Grassroot Practice Engine
+# PRD: Grassroot Personalized Practice
 
-*Product requirements doc for the personalized-practice feature. Written before any code. Draft v0.1: needs review by both cofounders before the first feature ticket starts.*
+*Product requirements doc for the personalized-practice feature. Written before any code. Draft v0.1: needs review by Jonathon and the Grassroot cofounder before the first feature ticket starts.*
 
-**Owner:** Jonathon (GitHub: jonathon-lockridge)
+**Owner:** Jonathon, product design intern (GitHub: jonathon-lockridge)
 **Last updated:** 2026-11-12
 
 ## Goal

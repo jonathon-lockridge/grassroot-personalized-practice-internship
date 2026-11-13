@@ -1,10 +1,10 @@
-# Grassroot Practice Engine
+# Grassroot Personalized Practice
 
-Personalized practice for [Grassroot Academy](https://grassroot.academy): the engine turns a learner's attempt history into the next set of practice problems, with a plain-language reason for each pick.
+Product design internship project at [Grassroot Academy](https://grassroot.academy): personalizing practice problems from each learner's own data. The engine turns a learner's attempt history into the next set of practice problems, with a plain-language reason for each pick.
 
 ## Status
 
-In development. Project setup is done; the first feature ticket (T1 in [TODO.md](TODO.md)) is next. Not deployed. The PRD is a draft awaiting both cofounders' review.
+In development. Project setup is done; the first feature ticket (T1 in [TODO.md](TODO.md)) is next. Not deployed. The plan (PRD.md) is a draft awaiting review by Jonathon and the Grassroot cofounder.
 
 ## What v1 will do
 
@@ -28,8 +28,8 @@ In development. Project setup is done; the first feature ticket (T1 in [TODO.md]
 Full steps in [SETUP.md](SETUP.md). Short version:
 
 ```bash
-git clone https://github.com/jonathon-lockridge/grassroot-practice-engine.git
-cd grassroot-practice-engine
+git clone https://github.com/jonathon-lockridge/grassroot-personalized-practice-internship.git
+cd grassroot-personalized-practice-internship
 cp .env.example .env
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
