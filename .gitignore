@@ -1,4 +1,4 @@
-# secrets (real values live only in .env; .env.example has names only)
+# secrets (real values live only in .env; .env.example has names and safe defaults)
 .env
 .env.*
 !.env.example
@@ -15,10 +15,9 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
-# local data and databases
+# local databases
 *.db
 *.sqlite3
-data/exports/
 
 # system and editor files
 .DS_Store
