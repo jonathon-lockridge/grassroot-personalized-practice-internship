@@ -8,7 +8,7 @@ This is an independent project, reviewed with Grassroot's cofounder as mentor. I
 
 ## Where things stand
 
-The plan is [PRD.md](PRD.md). The work is small steps in [TODO.md](TODO.md), and step T1a is next. So far there is only a placeholder web server and one test; no feature code. Written in Python 3.12. Data will live in one local file (SQLite; step T5). A small web server (made with a tool called FastAPI) is already set up for when a web page, or a connection to Grassroot, needs it.
+The plan is [PRD.md](PRD.md). The work is small steps in [TODO.md](TODO.md), and step T1b is next. So far: the shapes of a course and a checker that finds faults in a course file (`src/practice_engine/models.py`), a tiny two-problem algebra course (`data/linear-equations/course.json`), 28 tests, and a placeholder web server. Written in Python 3.12. Data will live in one local file (SQLite; step T5). A small web server (made with a tool called FastAPI) is already set up for when a web page, or a connection to Grassroot, needs it.
 
 ## Running it
 

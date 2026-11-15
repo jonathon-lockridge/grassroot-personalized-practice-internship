@@ -1,0 +1,80 @@
+{
+  "id": "linear-equations",
+  "title": "Solving linear equations",
+  "skills": [
+    {
+      "id": "undo_addition",
+      "name": "Undo addition or subtraction on both sides",
+      "prerequisites": []
+    },
+    {
+      "id": "undo_multiplication",
+      "name": "Undo multiplication or division on both sides",
+      "prerequisites": ["undo_addition"]
+    }
+  ],
+  "problems": [
+    {
+      "id": "one_step_add",
+      "prompt": "Solve x + 7 = 12.",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "What do you do to both sides?",
+          "kind": "choice",
+          "options": ["Subtract 7", "Add 7", "Divide by 7"],
+          "answer": "Subtract 7",
+          "hint": "Whatever is added to x, take it away from both sides.",
+          "skill": "undo_addition"
+        },
+        {
+          "prompt": "So x equals what number?",
+          "kind": "number",
+          "answer": 5,
+          "hint": "12 minus 7.",
+          "skill": "undo_addition"
+        }
+      ]
+    },
+    {
+      "id": "two_step",
+      "prompt": "Solve 3x + 5 = 23.",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "Put the moves in the usual order, the one that avoids fractions.",
+          "kind": "order",
+          "answer": [
+            "Subtract 5 from both sides",
+            "Divide both sides by 3",
+            "Check the answer by putting it back into the equation"
+          ],
+          "hint": "To build 3x + 5 you multiply by 3, then add 5. Undo it in reverse: take away the 5 first, then undo the times 3, then check.",
+          "skill": "undo_multiplication"
+        },
+        {
+          "prompt": "After subtracting 5 from both sides, 3x equals what?",
+          "kind": "number",
+          "answer": 18,
+          "hint": "23 minus 5.",
+          "skill": "undo_addition"
+        },
+        {
+          "prompt": "Now what do you do to both sides?",
+          "kind": "choice",
+          "options": ["Divide by 3", "Subtract 3", "Multiply by 3"],
+          "answer": "Divide by 3",
+          "hint": "3x means 3 times x, so undo it with division.",
+          "skill": "undo_multiplication"
+        },
+        {
+          "prompt": "So x equals what number?",
+          "kind": "number",
+          "answer": 6,
+          "hint": "18 divided by 3.",
+          "skill": "undo_multiplication"
+        }
+      ]
+    }
+  ]
+}

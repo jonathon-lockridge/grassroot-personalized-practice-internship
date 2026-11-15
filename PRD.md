@@ -3,7 +3,7 @@
 *What we're building, for whom, and how we'll know it works. The one document to read. Draft, being reviewed section by section.*
 
 **Owner:** Jonathon, product design intern. **Mentor:** Grassroot Academy's cofounder, who reviews focus and progress at check-ins.
-**Last updated:** 2026-11-13
+**Last updated:** 2026-11-14
 
 ## Goal
 
@@ -92,7 +92,7 @@ Grassroot's platform would talk to the engine with four kinds of request, each c
 
 ## Open questions
 
-- [ ] Which subject for the first hand-made sample course? Physics (the step-by-step example) or algebra (linear equations: every answer is a whole number, no units or rounding to worry about). Whichever comes second becomes the test that a new course is only a data change. (Jonathon, before T1a)
+- [x] Which subject for the first hand-made sample course? Algebra: solving linear equations, from the OpenStax Elementary Algebra chapter. Physics comes second, generated in T7, as the test that a new course is only a data change. (Decided 2026-11-14)
 - [ ] How often are check-ins, and what does the mentor want to see first? (Jonathon + mentor)
 - [ ] Which AI service for generating courses and variants, and do we have an account with it (which gives a secret access code, the key) and a budget? Needed by step T7. (Jonathon)
 - [ ] Web page or not? Decided at step T4 after trying the simplest version. (Jonathon)
