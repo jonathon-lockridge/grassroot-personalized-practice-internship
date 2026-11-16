@@ -5,6 +5,20 @@
 ## Now (one step only)
 
 - [ ] **T1b Grow the course.** Same file, by hand, taking skills and problem patterns from the OpenStax Elementary Algebra chapter on solving linear equations (free and openly licensed): 8 to 12 skills in a prerequisite chain (every skill except the first one or two lists one or two prerequisites), 10 to 15 problems of 3 to 4 steps each, about a third at each difficulty. Working method: write the skills first; write problems in a plain table (one line per step: question, kind, answer, hint, skill); turn the table into the file; solve every problem yourself to check each answer and hint; stop at 10 problems and add more only if time remains. Reusing one problem's steps with new numbers counts as a new problem. **Done when:** the T1a tests still pass and a new test asserts at least 8 skills and 10 problems. The file format is described at the top of `src/practice_engine/models.py` and in the T1a entry under Done.
+  - Skill list (agreed 2026-11-15), in the order a student learns them. These go into `course.json` together with the problems that use them, because the checker complains about any skill no step uses.
+
+    | id | name | depends on |
+    |---|---|---|
+    | `undo_addition` | Undo addition or subtraction on both sides | none |
+    | `check_solution` | Check an answer by putting it back into the equation | `undo_addition` |
+    | `undo_multiplication` | Undo multiplication or division on both sides | `undo_addition` |
+    | `combine_like_terms` | Combine like terms on one side (3x + 2x becomes 5x) | `undo_addition` |
+    | `two_step` | Solve a two-step equation, such as 2x + 3 = 11 | `undo_multiplication` |
+    | `variables_both_sides` | Move the x terms to one side, such as 5x + 2 = 3x + 8 | `two_step`, `combine_like_terms` |
+    | `distribute` | Remove brackets by multiplying in: 2(x + 3) becomes 2x + 6 | `combine_like_terms` |
+    | `general_strategy` | Solve any linear equation: simplify, gather the x terms, then undo | `distribute`, `variables_both_sides` |
+    | `clear_fractions` | Clear fractions by multiplying both sides by a common bottom number | `general_strategy` |
+    | `clear_decimals` | Clear decimals by multiplying both sides by 10 or 100 | `clear_fractions` |
 
 ## Next
 
