@@ -45,7 +45,7 @@
       "difficulty": 1,
       "steps": [
         {
-          "prompt": "What do you do to both sides?",
+          "prompt": "Which move gets x by itself?",
           "kind": "choice",
           "options": ["Subtract 7", "Add 7", "Divide by 7"],
           "answer": "Subtract 7",
@@ -58,6 +58,13 @@
           "answer": 5,
           "hint": "12 minus 7.",
           "skill": "undo_addition"
+        },
+        {
+          "prompt": "Check it: what is 5 + 7?",
+          "kind": "number",
+          "answer": 12,
+          "hint": "A correct answer gives the right side of the equation.",
+          "skill": "check_solution"
         }
       ]
     },
@@ -75,7 +82,7 @@
             "Check the answer by putting it back into the equation"
           ],
           "hint": "To build 3x + 5 you multiply by 3, then add 5. Undo it in reverse: take away the 5 first, then undo the times 3, then check.",
-          "skill": "undo_multiplication"
+          "skill": "two_step"
         },
         {
           "prompt": "After subtracting 5 from both sides, 3x equals what?",
@@ -85,7 +92,7 @@
           "skill": "undo_addition"
         },
         {
-          "prompt": "Now what do you do to both sides?",
+          "prompt": "Now 3x = 18. Which move gets x by itself?",
           "kind": "choice",
           "options": ["Divide by 3", "Subtract 3", "Multiply by 3"],
           "answer": "Divide by 3",
