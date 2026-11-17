@@ -19,6 +19,13 @@
     | `general_strategy` | Solve any linear equation: simplify, gather the x terms, then undo | `distribute`, `variables_both_sides` |
     | `clear_fractions` | Clear fractions by multiplying both sides by a common bottom number | `general_strategy` |
     | `clear_decimals` | Clear decimals by multiplying both sides by 10 or 100 | `clear_fractions` |
+  - How to check every step (agreed 2026-11-16, after a step was found to have two correct moves):
+    1. Solve the problem yourself on paper.
+    2. For each step, ask whether a student could do something else and still be right. Doing the same move to both sides is always legal, so a question names its goal ("Which move gets x by itself?") instead of asking "What do you do first?". If two moves still fit, reword the question or change the problem.
+    3. For a choice step, make sure every wrong option really is wrong for what the question asks.
+    4. Put the final answer back into the starting equation.
+    5. Use the method the OpenStax textbook teaches.
+  - Progress: 7 problems and 7 skills in `course.json` (5 problems added 2026-11-16). Still to come: 3 hard problems for `general_strategy`, `clear_fractions` and `clear_decimals`, and the test for at least 8 skills and 10 problems.
 
 ## Next
 

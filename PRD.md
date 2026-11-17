@@ -45,6 +45,7 @@ Students don't know what they don't know. Left to choose, they grind problems th
 - New student with no history: a short diagnostic, one problem per main skill, instead of guessing.
 - A wrong step answered in under 3 seconds looks like a guess and moves mastery less.
 - A one-step problem: just a problem with one step. Multiple choice still works.
+- A step with more than one correct move, in any subject: a wrong-looking answer that is really another correct method must not count against a skill. For now each step's question names its goal, so only one answer fits; this is checked by hand when problems are written, and generated problems will need the same check.
 - A course with no prerequisite information (likely for generated courses): the prerequisite rule switches off, the rest still works.
 - A generated course whose data fails the checks (a step with no answer, a skill nobody uses): rejected before any student sees it.
 - Nothing left that fits the rules: relax them in order (a different difficulty, then a problem seen earlier today, then any skill), and if AI generation is switched on, a generated variant. Never come up empty while any problem exists.
