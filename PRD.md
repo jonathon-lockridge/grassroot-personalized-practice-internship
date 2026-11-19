@@ -3,7 +3,7 @@
 *What we're building, for whom, and how we'll know it works. The one document to read. Draft, being reviewed section by section.*
 
 **Owner:** Jonathon, product design intern. **Mentor:** Grassroot Academy's cofounder, who reviews focus and progress at check-ins.
-**Last updated:** 2026-11-14
+**Last updated:** 2026-11-18
 
 ## Goal
 
@@ -91,6 +91,16 @@ Each with the strongest argument against it, so future-us knows why.
 
 Grassroot's platform would talk to the engine with four kinds of request, each carrying an anonymous student id and a secret code that proves it is Grassroot: record a step answer, get the next problems (with reasons), get the student's mastery per skill, and forget a student. At that point Grassroot's rules apply in full: no personal data in the engine, children's and students' data laws (COPPA, FERPA), deletion within 60 days, data stored in Postgres (the database system Grassroot uses) instead of the local file, and Grassroot's public promise that learner data is never used to train AI models. Nothing in the current plan conflicts with those.
 
+## Similar work, and what we take from it
+
+Looked up 2026-11-18. None of these changes the plan; each is something to borrow at a named step.
+
+- **OATutor** (UC Berkeley, open source, github.com/CAHLR/OATutor). The closest thing to this project: a free tutor that keeps mastery per skill with the same method as decision 3, and by default picks the problem whose skills the student is weakest at. Its content (github.com/CAHLR/OATutor-Content, free to reuse if credited, licence CC BY 4.0) has problems with hints for the same OpenStax chapter as our algebra course, lessons 2.1 to 2.5, and its skills for those lessons match our skill list closely. **How we differ:** its steps usually ask only for the final answer, while ours cut each problem into small steps with one skill each; we also add prerequisites, a reason for every pick, and timing. **Use at:** T1b (a source of numbers and hints, credited), T3 (its "weakest skill first" rule as a starting point).
+- **pyBKT** (same Berkeley group, a free Python tool). Works out the four fixed numbers behind decision 3 from real answers instead of setting them by hand, and can make up simulated students. **Use at:** T6 (simulated students), and later to check the hand-set numbers.
+- **Math Academy's "credit flows down" idea.** Getting a hard step right is also quiet practice of the easier skills underneath it, so it can count a little toward them; a miss casts doubt on what is built on top. **Use at:** T2 or T3; see the open question below.
+- **Eedi's misconception data.** Each wrong option in a multiple-choice question is a specific common mistake, such as adding 7 instead of subtracting it. Then a wrong pick says *why* the student is stuck, not only *that* they are. **Use at:** T1b (write wrong options this way), T8 (compare with what students say they struggled with).
+- **SymPy** (a free Python tool that does algebra). It can solve an equation by itself, so a generated problem's answer can be checked automatically before any student sees it. **Use at:** T7, as part of the checks in decision 5.
+
 ## Open questions
 
 - [x] Which subject for the first hand-made sample course? Algebra: solving linear equations, from the OpenStax Elementary Algebra chapter. Physics comes second, generated in T7, as the test that a new course is only a data change. (Decided 2026-11-14)
@@ -99,3 +109,5 @@ Grassroot's platform would talk to the engine with four kinds of request, each c
 - [ ] Web page or not? Decided at step T4 after trying the simplest version. (Jonathon)
 - [ ] How many test students can we get, and when? Needed by step T8. (Jonathon)
 - [ ] Should this eventually plug into Grassroot? Ask once there is something to show. (mentor)
+- [ ] Reuse OATutor's credited problems for some of the course, or keep writing every problem by hand? Decide before the last three T1b problems. (Jonathon + mentor)
+- [ ] When a student gets a step right, should the skills underneath it also rise a little? Decide in T2 or T3. (Jonathon)
