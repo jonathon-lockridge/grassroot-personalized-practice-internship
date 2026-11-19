@@ -25,7 +25,7 @@
     3. For a choice step, make sure every wrong option really is wrong for what the question asks.
     4. Put the final answer back into the starting equation.
     5. Use the method the OpenStax textbook teaches.
-  - Progress: 7 problems and 7 skills in `course.json` (5 problems added 2026-11-16). The first two problems were reworded the same day to follow the checklist, and the first one gained a check step. Still to come: 3 hard problems for `general_strategy`, `clear_fractions` and `clear_decimals`, and the test for at least 8 skills and 10 problems.
+  - Progress: 7 problems and 7 skills in `course.json` (5 problems added 2026-11-16). The first two problems were reworded the same day to follow the checklist, and the first one gained a check step. Still to come: 3 hard problems for `general_strategy`, `clear_fractions` and `clear_decimals`, and the test for at least 8 skills and 10 problems. Their equations may come from OATutor, with our own steps and hints and a credit line in `data/linear-equations/SOURCES.md` (see the decided question in PRD.md).
 
 ## Next
 
