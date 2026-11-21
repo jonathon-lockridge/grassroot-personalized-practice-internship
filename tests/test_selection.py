@@ -2,12 +2,18 @@
 
 Most tests build a tiny course in code, so the rule being checked is easy to see.
 The last few use the real physics course.
+
+Handy numbers for the tiny courses: every step is a number step unless a test says
+otherwise, and the chance of getting a number step right is 0.2 + 0.65 x mastery
+(mastery.chance_correct). So mastery 1.0 gives 0.85, 0.6 gives 0.59, 0 gives 0.2.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from practice_engine.mastery import new_mastery_state
+import pytest
+
+from practice_engine.mastery import MASTERED, new_mastery_state
 from practice_engine.models import (
     Course,
     MasteryState,
@@ -19,9 +25,9 @@ from practice_engine.models import (
     validate_course,
 )
 from practice_engine.selection import (
-    FADING_DAYS,
-    MASTERED,
+    MAX_BATCH_SKILLS,
     READY_MASTERY,
+    STUCK_STEPS,
     MissedStep,
     next_problems,
 )
@@ -31,12 +37,41 @@ COURSE = (
     Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
 )
 NOW = datetime(2026, 11, 20, 12, 0)
-LAST_WEEK = NOW - timedelta(days=FADING_DAYS + 1)
+LAST_WEEK = NOW - timedelta(days=7)
+KNOWN = MASTERED + 0.02  # a mastery number high enough to count as mastered
 
 
-def tiny_course(skills: dict[str, list[str]], problems: list[tuple[str, int, list[str]]]) -> Course:
+def tiny_course(skills: dict[str, list[str]], problems: list[tuple]) -> Course:
     """A small course: `skills` is skill id -> prerequisites; each problem is
-    (id, difficulty, the skill of each step). Every step is a number step."""
+    (id, difficulty, the skill of each step), with an optional fourth item: the
+    answer of a choice first step (options "X" and "Y"). Other steps are number steps.
+    A problem's title is "Problem <id>"; a skill's name is "Skill <id>"."""
+    built = []
+    for problem_id, difficulty, step_skills, *first_answer in problems:
+        steps = [
+            Step(prompt="A step.", kind="number", answer=1, hint="A hint.", skill=skill)
+            for skill in step_skills
+        ]
+        if first_answer:
+            wrong = "Y" if first_answer[0] == "X" else "X"
+            steps[0] = Step(
+                prompt="Which idea?",
+                kind="choice",
+                options=["X", "Y"],
+                answer=first_answer[0],
+                hint="A hint.",
+                skill=step_skills[0],
+                feedback={wrong: "Not this one."},
+            )
+        built.append(
+            Problem(
+                id=problem_id,
+                title=f"Problem {problem_id}",
+                prompt="A problem.",
+                difficulty=difficulty,
+                steps=steps,
+            )
+        )
     course = Course(
         id="tiny",
         title="Tiny course",
@@ -44,37 +79,41 @@ def tiny_course(skills: dict[str, list[str]], problems: list[tuple[str, int, lis
             Skill(id=skill_id, name=f"Skill {skill_id}", prerequisites=prerequisites)
             for skill_id, prerequisites in skills.items()
         ],
-        problems=[
-            Problem(
-                id=problem_id,
-                prompt="A problem.",
-                difficulty=difficulty,
-                steps=[
-                    Step(prompt="A step.", kind="number", answer=1, hint="A hint.", skill=skill)
-                    for skill in step_skills
-                ],
-            )
-            for problem_id, difficulty, step_skills in problems
-        ],
+        problems=built,
     )
     assert validate_course(course) == []  # make sure the test course itself is sound
     return course
 
 
-def state(mastery: dict[str, float]) -> MasteryState:
-    return MasteryState(nickname="sam", mastery=mastery)
+def state(mastery: dict[str, float], course_id: str = "tiny") -> MasteryState:
+    return MasteryState(nickname="sam", course_id=course_id, mastery=mastery)
 
 
-def answer(problem_id: str, position: int, correct: bool, when: datetime = NOW) -> StepAnswer:
+def answer(
+    problem_id: str,
+    position: int,
+    correct: bool,
+    when: datetime = NOW,
+    attempt: int = 1,
+    hints_used: int = 0,
+) -> StepAnswer:
     return StepAnswer(
         nickname="sam",
         problem_id=problem_id,
         step_position=position,
         correct=correct,
         seconds=20,
-        hints_used=0,
+        hints_used=hints_used,
         answered_at=when,
+        attempt=attempt,
     )
+
+
+def streak(problem_id: str, when: datetime) -> list[StepAnswer]:
+    """Four right first tries on step 1 (a number step) of a problem, a minute apart:
+    from a new student's number, enough to reach MASTERED with a streak, so the skill
+    counts as mastered from the fourth one (mastery.is_mastered)."""
+    return [answer(problem_id, 1, True, when + timedelta(minutes=i)) for i in range(4)]
 
 
 # An old, right answer: enough history that the student is not new, but it blocks
@@ -84,6 +123,10 @@ OLD_RIGHT = [answer("p_old", 1, True, LAST_WEEK)]
 
 def ids(picks: list) -> list[str]:
     return [pick.problem_id for pick in picks]
+
+
+def skills_of(picks: list) -> list[str]:
+    return [pick.target_skill for pick in picks]
 
 
 # Rule 1: a starting check for a new student.
@@ -105,8 +148,11 @@ def test_new_student_gets_a_starting_check_covering_starting_skills_first() -> N
     # a_easy covers starting skill a (and c), b_easy covers b; then nothing is left
     # to cover, so the check stops at two problems.
     assert ids(picks) == ["a_easy", "b_easy"]
-    assert [pick.target_skill for pick in picks] == ["a", "b"]
-    assert all(pick.reason.startswith("Starting check") for pick in picks)
+    assert skills_of(picks) == ["a", "b"]
+    assert picks[0].reason == (
+        "Starting check: you are new here, so this problem shows what you "
+        "already know about Skill a."
+    )
     assert not any(pick.is_follow_up for pick in picks)
 
 
@@ -119,7 +165,24 @@ def test_starting_check_is_at_most_count_problems() -> None:
     assert ids(next_problems(course, state({}), [], NOW, count=2)) == ["pa", "pb"]
 
 
-# Rule 2: follow-up on the most recent missed step.
+def test_answers_by_another_student_or_not_in_the_course_are_ignored() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
+    someone_else = answer("p1", 1, False).model_copy(update={"nickname": "alex"})
+    history = [answer("gone", 1, False), someone_else]
+
+    picks = next_problems(course, state({}), history, NOW, count=1)
+
+    assert picks[0].reason.startswith("Starting check")
+
+
+def test_a_state_for_another_course_is_refused() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"])])
+
+    with pytest.raises(ValueError, match="is for course 'other'"):
+        next_problems(course, state({}, course_id="other"), [], NOW)
+
+
+# Rule 2: follow-up on the most recent missed first try.
 
 
 def test_follow_up_practices_the_missed_skill_and_fills_its_fields() -> None:
@@ -136,12 +199,42 @@ def test_follow_up_practices_the_missed_skill_and_fills_its_fields() -> None:
     assert first.is_follow_up is True
     assert first.target_skill == "b"
     assert first.missed_step == MissedStep(problem_id="p1", step_position=2)
+    # The reason names the problem by its title and the skill by its name, never ids.
     assert first.reason == (
-        "Picked for you: you missed step 2 of p1 (Skill b), "
+        "Picked for you: you missed step 2 of Problem p1 (Skill b), "
         "so this problem practices that skill again."
     )
-    # The other picks are not follow-ups and have no missed step.
+    # The other picks are not follow-ups, have no missed step, and say so in their reason.
     assert all(not pick.is_follow_up and pick.missed_step is None for pick in picks[1:])
+    assert not any(pick.reason.startswith("Picked for you") for pick in picks[1:])
+
+
+def test_a_hinted_first_try_counts_as_missed() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
+    history = [answer("p1", 1, True, hints_used=1)]  # right, but after a hint
+
+    picks = next_problems(course, state({"a": 0.3}), history, NOW, count=1)
+
+    assert picks[0].is_follow_up is True
+
+
+def test_a_right_second_try_does_not_cancel_the_follow_up() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
+    history = [answer("p1", 1, False), answer("p1", 1, True, attempt=2)]
+
+    picks = next_problems(course, state({"a": 0.3}), history, NOW, count=1)
+
+    assert picks[0].is_follow_up is True
+    assert picks[0].missed_step == MissedStep(problem_id="p1", step_position=1)
+
+
+def test_a_wrong_second_try_is_not_a_miss() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
+    history = [answer("p1", 1, True), answer("p1", 1, False, attempt=2)]
+
+    picks = next_problems(course, state({"a": 0.3}), history, NOW, count=1)
+
+    assert picks[0].is_follow_up is False
 
 
 def test_follow_up_goes_to_the_weakest_unready_prerequisite_and_says_so() -> None:
@@ -160,7 +253,7 @@ def test_follow_up_goes_to_the_weakest_unready_prerequisite_and_says_so() -> Non
     assert first.target_skill == "b"
     assert first.is_follow_up is True
     assert first.missed_step == MissedStep(problem_id="pc", step_position=1)
-    assert "you missed step 1 of pc (Skill c)" in first.reason
+    assert "you missed step 1 of Problem pc (Skill c)" in first.reason
     assert "builds on Skill b" in first.reason
 
 
@@ -174,179 +267,310 @@ def test_no_follow_up_once_the_missed_skill_was_answered_right() -> None:
     assert not any(pick.is_follow_up for pick in picks)
 
 
+# The stuck rule.
+
+
+def misses(problem_id: str, how_many: int) -> list[StepAnswer]:
+    """`how_many` missed first tries on step 1 of a problem, last week, a minute apart."""
+    return [answer(problem_id, 1, False, LAST_WEEK + timedelta(minutes=i)) for i in range(how_many)]
+
+
+def test_stuck_follow_up_steps_back_to_the_weakest_prerequisite_not_mastered() -> None:
+    course = tiny_course(
+        {"a": [], "b": ["a"]},
+        [("pb1", 1, ["b"]), ("pb2", 1, ["b"]), ("pa", 1, ["a"])],
+    )
+    # a is ready (so b is too) but not mastered: it has no streak of right answers.
+    mastery = {"a": READY_MASTERY + 0.05, "b": 0.3}
+
+    stuck = next_problems(course, state(mastery), misses("pb1", STUCK_STEPS), NOW, count=1)
+    not_yet = next_problems(course, state(mastery), misses("pb1", STUCK_STEPS - 1), NOW, count=1)
+
+    assert stuck[0].target_skill == "a"
+    assert stuck[0].is_follow_up is True
+    assert stuck[0].reason == (
+        "Picked for you: you missed step 1 of Problem pb1 (Skill b). Skill b has been "
+        "hard for a while, so this problem practices Skill a, which it builds on."
+    )
+    assert not_yet[0].target_skill == "b"
+
+
+def test_later_tries_do_not_count_toward_stuck() -> None:
+    course = tiny_course(
+        {"a": [], "b": ["a"]},
+        [("pb1", 1, ["b"]), ("pb2", 1, ["b"]), ("pa", 1, ["a"])],
+    )
+    mastery = {"a": READY_MASTERY + 0.05, "b": 0.3}
+    # Seven missed first tries, then three missed second tries: still only seven.
+    history = misses("pb1", STUCK_STEPS - 1) + [
+        answer("pb1", 1, False, LAST_WEEK + timedelta(hours=1), attempt=2) for _ in range(3)
+    ]
+
+    picks = next_problems(course, state(mastery), history, NOW, count=1)
+
+    assert picks[0].target_skill == "b"
+    assert "hard for a while" not in picks[0].reason
+
+
+def test_stuck_with_no_prerequisite_gets_the_easiest_problem() -> None:
+    course = tiny_course(
+        {"b": [], "strong": []},
+        [("b_hard", 3, ["b", "strong"]), ("b_easy", 1, ["b"])],
+    )
+    # Normally b_hard fits better: its strong step lifts its predicted success
+    # (0.62 against 0.40) closer to the target.
+    mastery = {"b": 0.3, "strong": 1.0}
+
+    stuck = next_problems(course, state(mastery), misses("b_easy", STUCK_STEPS), NOW, count=1)
+    not_yet = next_problems(course, state(mastery), misses("b_easy", STUCK_STEPS - 1), NOW, count=1)
+
+    assert ids(stuck) == ["b_easy"]
+    assert "Skill b has been hard for a while, so this is an easier problem on it." in (
+        stuck[0].reason
+    )
+    assert ids(not_yet) == ["b_hard"]
+
+
+def test_stuck_partway_skill_steps_back_too() -> None:
+    course = tiny_course({"a": [], "b": ["a"]}, [("pb", 1, ["b"]), ("pa", 1, ["a"])])
+    # Eight first tries on b, the last one right, so there is no follow-up.
+    history = misses("pb", STUCK_STEPS - 1) + [
+        answer("pb", 1, True, LAST_WEEK + timedelta(hours=1))
+    ]
+    mastery = {"a": READY_MASTERY + 0.05, "b": 0.4}
+
+    picks = next_problems(course, state(mastery), history, NOW, count=1)
+
+    assert picks[0].target_skill == "a"
+    assert picks[0].is_follow_up is False
+    assert picks[0].reason == (
+        "Skill b has been hard for a while, so this problem practices Skill a, which it builds on."
+    )
+
+
 # Rule 3: partway skills, weakest first.
 
 
 def test_partway_skills_come_weakest_first() -> None:
     course = tiny_course(
-        {"a": [], "b": [], "c": [], "d": []},
-        [("p_old", 1, ["d"]), ("pa", 2, ["a"]), ("pb", 2, ["b"]), ("pc", 1, ["c"])],
+        {"a": [], "b": [], "c": []},
+        [("pa", 2, ["a"]), ("pb", 2, ["b"]), ("pc", 1, ["c"]), ("pc2", 1, ["c"])],
     )
-    # a and b are partway (b weaker); c is barely started; d is mastered.
-    mastery = {"a": 0.6, "b": 0.45, "c": 0.1, "d": 0.95}
+    # a and b were tried (b is weaker). c has the lowest number but was never tried,
+    # so it is new, not partway.
+    history = [answer("pa", 1, True, LAST_WEEK), answer("pb", 1, True, LAST_WEEK)]
+    mastery = {"a": 0.6, "b": 0.45, "c": 0.1}
 
-    picks = next_problems(course, state(mastery), OLD_RIGHT, NOW, count=2)
+    picks = next_problems(course, state(mastery), history, NOW, count=2)
 
-    assert ids(picks) == ["pb", "pa"]
+    assert skills_of(picks) == ["b", "a"]
+    assert picks[0].reason == (
+        "You are partway to mastering Skill b, so this problem helps you finish it."
+    )
+
+
+def test_high_number_without_a_streak_is_still_partway() -> None:
+    course = tiny_course({"a": [], "b": []}, [("pa", 1, ["a"]), ("pb", 1, ["b"])])
+    # a has a mastered-level number but only one right first try, so it is not mastered.
+    history = [answer("pa", 1, True, LAST_WEEK)]
+
+    picks = next_problems(course, state({"a": KNOWN, "b": 0.1}), history, NOW, count=1)
+
+    assert picks[0].target_skill == "a"
     assert "partway" in picks[0].reason
 
 
-# Rule 4: prerequisites before what depends on them.
+# The ready rule: prerequisites before what depends on them.
 
 
-def test_skill_that_is_not_ready_is_not_targeted() -> None:
-    course = tiny_course(
-        {"a": [], "b": ["a"]},
-        [("p_old", 1, ["a"]), ("pb", 2, ["b"]), ("pa", 2, ["a"])],
-    )
-    # b is partway and weaker, but a (its prerequisite) is below READY_MASTERY.
-    mastery = {"a": READY_MASTERY - 0.05, "b": 0.35}
+def test_skill_whose_prerequisite_is_below_ready_is_not_targeted() -> None:
+    course = tiny_course({"a": [], "b": ["a"]}, [("pb", 2, ["b"]), ("pa", 2, ["a"])])
+    history = [answer("pb", 1, True, LAST_WEEK)]  # b was tried, a never
 
-    picks = next_problems(course, state(mastery), OLD_RIGHT, NOW, count=1)
+    below = next_problems(course, state({"a": READY_MASTERY - 0.01, "b": 0.4}), history, NOW, 1)
+    at = next_problems(course, state({"a": READY_MASTERY, "b": 0.4}), history, NOW, 1)
 
-    assert picks[0].target_skill == "a"
+    assert below[0].target_skill == "a"  # b is not ready, so the new skill a comes first
+    assert at[0].target_skill == "b"  # b is ready and partway
 
 
 def test_course_with_no_prerequisites_switches_the_rule_off() -> None:
     course = tiny_course(
         {"a": [], "b": []},
-        [("p_old", 1, ["a"]), ("pb", 1, ["b"]), ("pa", 2, ["a"])],
+        [("pb", 1, ["b"]), ("pa", 2, ["a"])],
     )
+    history = [answer("pa", 1, True, LAST_WEEK), answer("pb", 1, True, LAST_WEEK)]
     # With no prerequisites anywhere, every skill is ready, so weakest-first decides.
-    picks = next_problems(course, state({"a": 0.6, "b": 0.35}), OLD_RIGHT, NOW, count=1)
+    picks = next_problems(course, state({"a": 0.6, "b": 0.35}), history, NOW, count=1)
 
     assert picks[0].target_skill == "b"
 
 
-# Rule 5: revisit fading skills.
+# Rule 4: spaced review of mastered skills.
+
+REVIEW_COURSE = {"a": [], "b": []}
+REVIEW_PROBLEMS = [("pa1", 1, ["a"]), ("pa2", 1, ["a"]), ("pa3", 1, ["a"]), ("pb", 1, ["b"])]
 
 
-def test_mastered_skill_not_practiced_for_a_while_comes_back() -> None:
-    course = tiny_course(
-        {"a": [], "b": []},
-        [("pa", 3, ["a"]), ("pb", 3, ["b"]), ("pa2", 3, ["a"]), ("pb2", 3, ["b"])],
-    )
-    # Both mastered; a was last practiced over a week ago, b yesterday-ish (25 hours).
-    history = [answer("pa", 1, True, LAST_WEEK), answer("pb", 1, True, NOW - timedelta(hours=25))]
-    mastery = {"a": MASTERED + 0.05, "b": MASTERED + 0.05}
+def test_mastered_skill_comes_back_for_review_after_one_day() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    history = streak("pa1", NOW - timedelta(days=1, hours=1))
 
-    picks = next_problems(course, state(mastery), history, NOW, count=1)
+    picks = next_problems(course, state({"a": KNOWN, "b": 0.1}), history, NOW, count=1)
 
     assert picks[0].target_skill == "a"
-    assert f"not practiced it in {FADING_DAYS + 1} days" in picks[0].reason
-
-
-# Rule 6: the student's difficulty level, then the next level up.
-
-
-def test_prefers_the_students_level_then_the_level_above() -> None:
-    course = tiny_course(
-        {"a": []},
-        [("p_old", 3, ["a"]), ("hard", 3, ["a"]), ("easy", 1, ["a"]), ("medium", 2, ["a"])],
-    )
-    # 0.3 is level 1 (easy). Only one skill, so the second pick has to reuse it.
-    picks = next_problems(course, state({"a": 0.3}), OLD_RIGHT, NOW, count=2)
-
-    assert ids(picks) == ["easy", "medium"]
-
-
-def test_level_comes_from_the_skills_mastery() -> None:
-    course = tiny_course(
-        {"a": []},
-        [("p_old", 1, ["a"]), ("easy", 1, ["a"]), ("medium", 2, ["a"]), ("hard", 3, ["a"])],
+    assert (
+        picks[0].reason == "Review: you mastered Skill a 1 day ago; a quick check keeps it fresh."
     )
 
-    assert ids(next_problems(course, state({"a": 0.5}), OLD_RIGHT, NOW, count=1)) == ["medium"]
-    assert ids(next_problems(course, state({"a": 0.8}), OLD_RIGHT, NOW, count=1)) == ["hard"]
+
+def test_skill_mastered_today_is_not_reviewed_yet() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    history = streak("pa1", NOW - timedelta(hours=5))
+
+    picks = next_problems(course, state({"a": KNOWN, "b": 0.1}), history, NOW)
+
+    assert not any(pick.reason.startswith("Review") for pick in picks)
 
 
-# Rule 7: a batch covers different skills.
+def test_a_right_answer_on_a_later_day_moves_to_the_next_gap() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    mastery = {"a": KNOWN, "b": 0.1}
+    mastered = streak("pa1", NOW - timedelta(days=5))
+    # Without a review since, the 1-day gap passed long ago.
+    assert next_problems(course, state(mastery), mastered, NOW, 1)[0].reason.startswith("Review")
+
+    # A right first try 2 days ago counts as the review, so the next gap is 3 days.
+    reviewed = mastered + [answer("pa2", 1, True, NOW - timedelta(days=2))]
+    today = next_problems(course, state(mastery), reviewed, NOW, count=1)
+    tomorrow = next_problems(course, state(mastery), reviewed, NOW + timedelta(days=1), count=1)
+
+    assert not today[0].reason.startswith("Review")
+    assert tomorrow[0].reason == (
+        "Review: you mastered Skill a 6 days ago; a quick check keeps it fresh."
+    )
 
 
-def test_batch_covers_different_skills_when_it_can() -> None:
+def test_a_miss_starts_the_review_gaps_over() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    mastery = {"a": KNOWN, "b": 0.1}
+    day = lambda n: NOW - timedelta(days=n)  # noqa: E731 (a one-line helper)
+    early = streak("pa1", day(10)) + [
+        answer("pa2", 1, True, day(9)),
+        answer("pa3", 1, True, day(6)),
+    ]
+    # Reviews on days -9 and -6 grew the gap to 7 days. The right answers on day -3
+    # come before that gap has passed, so they do not grow it, and nothing is due today.
+    kept = early + streak("pa1", day(3))
+    # The same, but with a miss on day -5: mastery was lost and earned again on day -3,
+    # so the gaps start over at 1 day, which has passed.
+    missed = early + [answer("pa2", 1, False, day(5))] + streak("pa1", day(3))
+
+    assert not next_problems(course, state(mastery), kept, NOW, 1)[0].reason.startswith("Review")
+    again = next_problems(course, state(mastery), missed, NOW, count=1)
+    assert (
+        again[0].reason == "Review: you mastered Skill a 3 days ago; a quick check keeps it fresh."
+    )
+
+
+def test_right_answers_before_a_review_is_due_do_not_grow_the_gap() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    mastery = {"a": KNOWN, "b": 0.1}
+    day = lambda n: NOW - timedelta(days=n)  # noqa: E731 (a one-line helper)
+    # Mastered on day -10, reviewed on day -9 (the 1-day gap passed), so the gap is 3
+    # days. The right answers on days -8 and -7 come too soon to count; day -6 does,
+    # so the gap is now 7 days from day -6, due tomorrow.
+    history = streak("pa1", day(10)) + [
+        answer("pa2", 1, True, day(9)),
+        answer("pa3", 1, True, day(8)),
+        answer("pa1", 1, True, day(7)),
+        answer("pa2", 1, True, day(6)),
+    ]
+
+    today = next_problems(course, state(mastery), history, NOW, count=1)
+    tomorrow = next_problems(course, state(mastery), history, NOW + timedelta(days=1), count=1)
+
+    assert not today[0].reason.startswith("Review")
+    assert tomorrow[0].reason.startswith("Review: you mastered Skill a 11 days ago")
+
+
+def test_review_clock_starts_when_the_number_reaches_mastered() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    # One right first try a day: the streak is complete on day -2, but the number
+    # only reaches MASTERED with the fourth, yesterday. So the clock starts yesterday,
+    # and the 1-day review is due today.
+    history = [answer("pa1", 1, True, NOW - timedelta(days=n)) for n in (4, 3, 2, 1)]
+
+    picks = next_problems(course, state({"a": KNOWN, "b": 0.1}), history, NOW, count=1)
+
+    assert picks[0].reason == (
+        "Review: you mastered Skill a 1 day ago; a quick check keeps it fresh."
+    )
+
+
+def test_a_right_step_inside_a_problem_on_other_skills_counts_as_the_review() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS + [("p_ba", 1, ["b", "a"])])
+    mastery = {"a": KNOWN, "b": 0.3}
+    mastered = streak("pa1", NOW - timedelta(days=3))
+    # Step 2 of p_ba is the a step, right on its first try two days later.
+    reviewed = mastered + [
+        answer("p_ba", 1, False, NOW - timedelta(days=1)),
+        answer("p_ba", 2, True, NOW - timedelta(days=1)),
+    ]
+
+    before = next_problems(course, state(mastery), mastered, NOW, count=3)
+    after = next_problems(course, state(mastery), reviewed, NOW, count=3)
+
+    assert any(pick.reason.startswith("Review") for pick in before)
+    assert not any(pick.reason.startswith("Review") for pick in after)
+
+
+# Rule 5: starting new skills whose prerequisites are ready.
+
+
+def test_new_ready_skill_comes_after_reviews_and_unready_ones_wait() -> None:
     course = tiny_course(
-        {"a": [], "b": [], "c": []},
+        {"rev": [], "new": [], "later": ["rev", "new"]},
         [
-            ("p_old", 1, ["a"]),
-            ("a1", 1, ["a"]),
-            ("a2", 1, ["a"]),
-            ("b1", 2, ["b"]),
-            ("c1", 2, ["c"]),
+            ("p_rev", 1, ["rev"]),
+            ("p_rev2", 1, ["rev"]),
+            ("p_new", 1, ["new"]),
+            ("p_later", 1, ["later"]),
         ],
     )
-    # a is the weakest partway skill, but the batch still spreads over three skills.
-    mastery = {"a": 0.31, "b": 0.5, "c": 0.6}
+    history = streak("p_rev", LAST_WEEK)
+    mastery = {"rev": KNOWN, "new": 0.1, "later": 0.1}
 
-    picks = next_problems(course, state(mastery), OLD_RIGHT, NOW)
+    picks = next_problems(course, state(mastery), history, NOW, count=2)
 
-    assert [pick.target_skill for pick in picks] == ["a", "b", "c"]
-
-
-# Rule 8: no repeats within 24 hours.
-
-
-def test_problem_answered_in_the_last_24_hours_is_not_picked() -> None:
-    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
-    history = [answer("p1", 1, True, NOW - timedelta(hours=23))]
-
-    picks = next_problems(course, state({"a": 0.35}), history, NOW, count=1)
-
-    assert ids(picks) == ["p2"]
+    assert skills_of(picks) == ["rev", "new"]
+    assert picks[1].reason == "This problem starts you on Skill new."
+    # "later" is new too, but "new" (one of its prerequisites) is not ready.
 
 
-# Loosening the rules, in order: difficulty, then repeats, then any skill.
+# The rules keep their order.
 
 
-def test_difficulty_is_loosened_before_repeats() -> None:
-    course = tiny_course({"a": []}, [("right_level", 1, ["a"]), ("too_hard", 3, ["a"])])
-    history = [answer("right_level", 1, True)]  # answered just now
-
-    picks = next_problems(course, state({"a": 0.35}), history, NOW, count=1)
-
-    assert ids(picks) == ["too_hard"]
-
-
-def test_repeats_are_loosened_before_any_skill() -> None:
+def test_follow_up_then_partway_then_review() -> None:
     course = tiny_course(
-        {"a": [], "b": []},
-        [("pa", 1, ["a"]), ("pb", 1, ["b"])],
+        {"miss": [], "part": [], "rev": [], "new": []},
+        [
+            ("p_miss", 1, ["miss"]),
+            ("p_part", 2, ["part"]),
+            ("p_rev", 3, ["rev"]),
+            ("p_new", 1, ["new"]),
+        ],
     )
-    history = [answer("pa", 1, True)]  # a's only problem was answered just now
-    # a is partway; b is barely started, so b is only reached by "any skill".
-    picks = next_problems(course, state({"a": 0.35, "b": 0.1}), history, NOW, count=1)
-
-    assert ids(picks) == ["pa"]
-
-
-def test_any_skill_is_used_when_no_rule_fits() -> None:
-    course = tiny_course(
-        {"a": [], "b": []},
-        [("p_old", 1, ["a"]), ("pb", 1, ["b"])],
+    history = (
+        streak("p_rev", LAST_WEEK)
+        + [answer("p_part", 1, True, LAST_WEEK)]
+        + [answer("p_miss", 1, False, LAST_WEEK + timedelta(hours=1))]
     )
-    # Nothing partway, nothing fading, no miss: "any skill" still gives a problem,
-    # weakest skill first.
-    picks = next_problems(course, state({"a": 0.1, "b": 0.05}), OLD_RIGHT, NOW, count=1)
-
-    assert ids(picks) == ["pb"]
-    # b was never answered, so the reason says this starts it, not "more practice".
-    assert picks[0].reason == "This problem starts you on Skill b, which you have not tried yet."
-    assert not picks[0].reason.startswith("Picked for you")  # that marks follow-ups only
-
-
-# The rules keep their order, even when a rule has to be loosened.
-
-
-def test_follow_up_then_partway_then_fading() -> None:
-    course = tiny_course(
-        {"miss": [], "part": [], "fade": []},
-        [("p_miss", 1, ["miss"]), ("p_part", 2, ["part"]), ("p_fade", 3, ["fade"])],
-    )
-    history = [answer("p_fade", 1, True, LAST_WEEK), answer("p_miss", 1, False, LAST_WEEK)]
-    mastery = {"miss": 0.35, "part": 0.5, "fade": MASTERED + 0.05}
+    mastery = {"miss": 0.35, "part": 0.5, "rev": KNOWN, "new": 0.1}
 
     picks = next_problems(course, state(mastery), history, NOW)
 
-    assert [pick.target_skill for pick in picks] == ["miss", "part", "fade"]
+    assert skills_of(picks) == ["miss", "part", "rev"]
 
 
 def test_follow_up_is_not_crowded_out_when_its_only_problem_was_just_done() -> None:
@@ -364,12 +588,177 @@ def test_follow_up_is_not_crowded_out_when_its_only_problem_was_just_done() -> N
     assert picks[0].problem_id == "p_miss"
 
 
-def test_answers_not_in_the_course_are_ignored() -> None:
-    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
-    # An unknown problem only: the student counts as new and gets the starting check.
-    picks = next_problems(course, state({}), [answer("gone", 1, False)], NOW, count=1)
+# The success target.
 
-    assert picks[0].reason.startswith("Starting check")
+# a is the target skill (tried once, partway); hi and lo are skills at 1.0 and 0.
+SUCCESS_MASTERY = {"a": 0.6, "hi": 1.0, "lo": 0.0}
+SUCCESS_SKILLS = {"a": [], "hi": [], "lo": []}
+A_TRIED = [answer("p_a", 1, True, LAST_WEEK)]
+
+
+def test_prefers_predicted_success_closest_to_the_middle_of_the_target() -> None:
+    course = tiny_course(
+        SUCCESS_SKILLS,
+        [
+            ("p_a", 1, ["a"]),  # 0.59: below the target
+            ("p_a_lo", 1, ["a", "lo"]),  # 0.40: below
+            ("p_a_hi", 1, ["a", "hi"]),  # 0.72: inside
+            ("p_a_hi_hi", 1, ["a", "hi", "hi"]),  # 0.76: inside, closest to 0.775
+        ],
+    )
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), A_TRIED, NOW, count=1)
+
+    assert ids(picks) == ["p_a_hi_hi"]
+
+
+def test_difficulty_breaks_a_tie_in_predicted_success() -> None:
+    course = tiny_course(
+        {"a": [], "hi": []},
+        [("p_a", 1, ["a"]), ("hard", 3, ["a", "hi"]), ("easy", 1, ["a", "hi"])],
+    )
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), A_TRIED, NOW, count=1)
+
+    assert ids(picks) == ["easy"]
+
+
+def test_when_nothing_is_inside_the_target_the_closest_is_picked() -> None:
+    course = tiny_course(
+        {"a": [], "lo": []},
+        [("p_a_lo", 1, ["a", "lo"]), ("p_a", 3, ["a"])],  # 0.40 and 0.59
+    )
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), A_TRIED, NOW, count=1)
+
+    assert ids(picks) == ["p_a"]
+
+
+def test_success_target_is_loosened_before_repeats() -> None:
+    course = tiny_course(
+        {"a": [], "hi": []},
+        [("p_a_hi", 1, ["a", "hi"]), ("p_a", 1, ["a"])],  # 0.72 (inside) and 0.59
+    )
+    history = [answer("p_a_hi", 1, True)]  # the problem inside the target, just now
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), history, NOW, count=1)
+
+    assert ids(picks) == ["p_a"]
+
+
+def test_problem_answered_in_the_last_24_hours_is_not_picked() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"])])
+    history = [answer("p1", 1, True, NOW - timedelta(hours=23))]
+
+    picks = next_problems(course, state({"a": 0.35}), history, NOW, count=1)
+
+    assert ids(picks) == ["p2"]
+
+
+def test_repeats_are_loosened_before_any_skill() -> None:
+    course = tiny_course({"a": [], "b": ["a"]}, [("pa", 1, ["a"]), ("pb", 1, ["b"])])
+    history = [answer("pa", 1, True)]  # a's only problem was answered just now
+    # a is partway; b is not ready, so b is only reached by "any skill".
+    picks = next_problems(course, state({"a": 0.35, "b": 0.1}), history, NOW, count=1)
+
+    assert ids(picks) == ["pa"]
+
+
+def test_any_skill_is_used_when_no_rule_fits() -> None:
+    course = tiny_course({"a": [], "b": []}, [("pa", 1, ["a"]), ("pb", 1, ["b"])])
+    # Both skills were mastered this morning: nothing is partway, new or due for
+    # review. Only "any skill" is left, and it still gives problems.
+    history = streak("pa", NOW - timedelta(hours=5)) + streak("pb", NOW - timedelta(hours=4))
+    picks = next_problems(course, state({"a": KNOWN, "b": KNOWN}), history, NOW, count=2)
+
+    assert sorted(ids(picks)) == ["pa", "pb"]
+    assert [pick.reason for pick in picks] == [
+        "More practice with Skill a.",
+        "More practice with Skill b.",
+    ]
+    assert not any(pick.reason.startswith("Picked for you") for pick in picks)
+
+
+# Mixing problem types.
+
+# p is the skill of each problem's first (choice) step; a is the target skill.
+MIX_SKILLS = {"p": [], "a": [], "hi": []}
+MIX_MASTERY = {"p": 0.9, "a": 0.7, "hi": 1.0}
+
+
+def pick_after(previous_answer: str, problems: list[tuple]) -> str:
+    """The first pick after the student did a problem whose first step's answer is
+    `previous_answer`."""
+    course = tiny_course(MIX_SKILLS, [("prev", 1, ["p", "a"], previous_answer), *problems])
+    history = [answer("prev", 2, True, LAST_WEEK)]  # step 2 is skill a
+    return next_problems(course, state(MIX_MASTERY), history, NOW, count=1)[0].problem_id
+
+
+def test_mixing_prefers_a_different_first_step_answer_when_otherwise_equal() -> None:
+    # Same skills and difficulty, so the same predicted success: only mixing differs.
+    problems = [("x_twin", 1, ["p", "a", "hi"], "X"), ("y_twin", 1, ["p", "a", "hi"], "Y")]
+
+    assert pick_after("X", problems) == "y_twin"
+    assert pick_after("Y", problems) == "x_twin"
+
+
+def test_closeness_to_the_middle_comes_before_mixing() -> None:
+    problems = [
+        ("x_close", 1, ["p", "a", "hi"], "X"),  # 0.77, closest to the middle
+        ("y_far", 1, ["p", "a"], "Y"),  # 0.73
+    ]
+
+    assert pick_after("X", problems) == "x_close"  # even though it repeats the type
+
+
+def test_two_picks_in_a_row_never_practice_the_same_skill_when_avoidable() -> None:
+    course = tiny_course(
+        {"a": [], "b": []},
+        [("a1", 1, ["a"]), ("a2", 1, ["a"]), ("b1", 1, ["b"]), ("b2", 1, ["b"])],
+    )
+    history = [answer("a1", 1, True, LAST_WEEK)]
+
+    picks = next_problems(course, state({"a": 0.4, "b": 0.3}), history, NOW, count=4)
+
+    targets = skills_of(picks)
+    assert len(picks) == 4
+    assert all(first != second for first, second in zip(targets, targets[1:], strict=False))
+
+
+def test_a_batch_keeps_to_three_skills() -> None:
+    skills = {name: [] for name in "abcde"}
+    course = tiny_course(skills, [(f"{name}{i}", 1, [name]) for name in "abcde" for i in (1, 2)])
+    history = [answer(f"{name}1", 1, True, LAST_WEEK) for name in "abcde"]
+
+    picks = next_problems(course, state({name: 0.4 for name in "abcde"}), history, NOW, count=5)
+
+    targets = skills_of(picks)
+    assert len(picks) == 5
+    assert len(set(targets)) == 3
+    assert all(first != second for first, second in zip(targets, targets[1:], strict=False))
+
+
+def test_count_above_the_skill_cap_can_give_fewer_picks() -> None:
+    skills = {name: [] for name in "abcde"}
+    course = tiny_course(skills, [(f"{name}1", 1, [name]) for name in "abcde"])
+    history = [answer(f"{name}1", 1, True, LAST_WEEK) for name in "abcde"]
+
+    picks = next_problems(course, state({name: 0.4 for name in "abcde"}), history, NOW, count=5)
+
+    # Skills a, b and c have one problem each, and d and e would be a fourth skill.
+    assert len(picks) == MAX_BATCH_SKILLS
+    assert ids(picks) == ["a1", "b1", "c1"]
+
+
+# Time zones.
+
+
+def test_mixing_times_with_and_without_a_time_zone_is_refused() -> None:
+    course = tiny_course({"a": []}, [("p1", 1, ["a"])])
+    history = [answer("p1", 1, True, NOW.replace(tzinfo=UTC))]
+
+    with pytest.raises(ValueError, match="time zone"):
+        next_problems(course, state({"a": 0.3}), history, NOW, count=1)
 
 
 # Never empty.
@@ -402,40 +791,90 @@ def test_real_course_starting_check() -> None:
 
     picks = next_problems(course, new_mastery_state(course, "sam"), [], NOW)
 
-    assert ids(picks) == ["push_cart", "bat_hits_ball", "rough_ramp"]
+    assert ids(picks) == ["box_slides_to_stop", "drag_crate", "bat_hits_ball"]
+
+
+def real_state(course: Course, **mastery: float) -> MasteryState:
+    """A new student's state for the real course, with some skills set by hand."""
+    student = new_mastery_state(course, "sam")
+    student.mastery.update(mastery)
+    return student
 
 
 def test_real_course_follow_up_after_a_missed_step() -> None:
     course = load_course(COURSE)
-    mastery = new_mastery_state(course, "sam").mastery
-    # Prerequisites of nonconservative_work (energy with friction) are ready.
-    mastery.update({"energy_conservation": 0.7, "nonconservative_work": 0.4})
-    # Step 3 of rough_ramp is a nonconservative_work step, answered wrong.
-    history = [answer("rough_ramp", step, step != 3) for step in (1, 2, 3)]
+    # The prerequisite of nonconservative_work (energy with friction) is ready.
+    student = real_state(course, energy_conservation=0.9, nonconservative_work=0.4)
+    # Step 4 of rough_ramp is a nonconservative_work step, answered wrong.
+    history = [answer("rough_ramp", step, step != 4) for step in (1, 2, 3, 4)]
 
-    picks = next_problems(course, state(mastery), history, NOW)
+    picks = next_problems(course, student, history, NOW)
 
     first = picks[0]
     assert first.is_follow_up is True
     assert first.target_skill == "nonconservative_work"
-    assert first.missed_step == MissedStep(problem_id="rough_ramp", step_position=3)
-    # rough_ramp was answered today, but it is the only problem with this skill, so the
-    # no-repeats rule is loosened rather than leaving the skill out.
-    assert first.problem_id == "rough_ramp"
-    assert "you missed step 3 of rough_ramp" in first.reason
-    assert len({pick.target_skill for pick in picks}) == 3
+    assert first.missed_step == MissedStep(problem_id="rough_ramp", step_position=4)
+    # rough_ramp was answered today, so another problem with this skill is picked.
+    assert first.problem_id != "rough_ramp"
+    assert first.reason.startswith(
+        "Picked for you: you missed step 4 of Block sliding down a rough ramp (Energy with friction"
+    )
+    assert len(set(skills_of(picks))) == 3
 
 
 def test_real_course_follow_up_steps_back_to_a_prerequisite() -> None:
     course = load_course(COURSE)
-    mastery = new_mastery_state(course, "sam").mastery  # every skill at 0.2
-    history = [answer("rough_ramp", step, step != 3) for step in (1, 2, 3)]
+    student = new_mastery_state(course, "sam")  # every skill at the starting value
+    history = [answer("rough_ramp", step, step != 4) for step in (1, 2, 3, 4)]
 
-    picks = next_problems(course, state(mastery), history, NOW)
+    picks = next_problems(course, student, history, NOW)
 
     # nonconservative_work needs energy_conservation, which needs kinetic_energy and
-    # potential_energy (tied at 0.2, so the first listed wins), which are ready.
+    # potential_energy (tied, so the first listed wins), which need nothing not ready.
     first = picks[0]
     assert first.target_skill == "kinetic_energy"
     assert first.is_follow_up is True
-    assert "builds on" in first.reason
+    assert "builds on Kinetic energy" in first.reason
+
+
+def test_real_course_review_of_a_mastered_skill() -> None:
+    course = load_course(COURSE)
+    student = real_state(course, newtons_laws=KNOWN)
+    # Four right first tries on Newton's-laws steps (all number steps) last week.
+    steps = [("box_slides_to_stop", 2), ("car_power", 2), ("car_power", 4), ("rough_ramp", 3)]
+    history = [
+        answer(problem_id, position, True, LAST_WEEK + timedelta(minutes=i))
+        for i, (problem_id, position) in enumerate(steps)
+    ]
+
+    picks = next_problems(course, student, history, NOW)
+
+    first = picks[0]
+    assert first.target_skill == "newtons_laws"
+    assert first.reason == (
+        "Review: you mastered Find a force from Newton's laws: balanced forces, F = ma, "
+        "friction = μN 7 days ago; a quick check keeps it fresh."
+    )
+    assert not first.is_follow_up
+    assert len(set(skills_of(picks))) >= 2  # a batch mixes at least two skills
+
+
+def test_real_course_reasons_never_show_ids() -> None:
+    course = load_course(COURSE)
+    all_ids = [skill.id for skill in course.skills] + [problem.id for problem in course.problems]
+    # Ids with an underscore cannot be mistaken for an ordinary word in a sentence.
+    all_ids = [some_id for some_id in all_ids if "_" in some_id]
+    scenarios = [
+        (new_mastery_state(course, "sam"), []),
+        (
+            real_state(course, energy_conservation=0.9, nonconservative_work=0.4),
+            [answer("rough_ramp", step, step != 4) for step in (1, 2, 3, 4)],
+        ),
+        (
+            real_state(course, momentum_impulse=KNOWN),
+            streak("bat_hits_ball", LAST_WEEK) + [answer("bat_hits_ball", 2, True, LAST_WEEK)],
+        ),
+    ]
+    for student, history in scenarios:
+        for pick in next_problems(course, student, history, NOW, count=3):
+            assert not any(some_id in pick.reason for some_id in all_ids), pick.reason
