@@ -1,0 +1,832 @@
+{
+  "id": "ap-physics-c-energy-momentum",
+  "title": "AP Physics C: Mechanics - Energy and momentum",
+  "skills": [
+    {
+      "id": "newtons_laws",
+      "name": "Find a force from Newton's laws: balanced forces, F = ma, friction = μN",
+      "prerequisites": []
+    },
+    {
+      "id": "kinetic_energy",
+      "name": "Kinetic energy, K = ½mv²",
+      "prerequisites": []
+    },
+    {
+      "id": "work_constant_force",
+      "name": "Work by a constant force, W = Fd cos θ, including its sign",
+      "prerequisites": []
+    },
+    {
+      "id": "work_variable_force",
+      "name": "Work by a changing force, W = ∫F dx",
+      "prerequisites": ["work_constant_force"]
+    },
+    {
+      "id": "work_energy_theorem",
+      "name": "Net work equals the change in kinetic energy, ΔK = ΣW",
+      "prerequisites": ["kinetic_energy", "work_constant_force"]
+    },
+    {
+      "id": "potential_energy",
+      "name": "Potential energy of gravity near Earth (mgΔy) and of a spring (½kx²)",
+      "prerequisites": ["work_constant_force"]
+    },
+    {
+      "id": "force_from_potential",
+      "name": "Force from potential energy, F = −dU/dx, and equilibrium on a U(x) curve",
+      "prerequisites": ["potential_energy", "work_variable_force"]
+    },
+    {
+      "id": "energy_conservation",
+      "name": "Conservation of mechanical energy: K + U stays the same with no friction",
+      "prerequisites": ["kinetic_energy", "potential_energy"]
+    },
+    {
+      "id": "nonconservative_work",
+      "name": "Energy with friction: work by friction changes K + U",
+      "prerequisites": ["energy_conservation"]
+    },
+    {
+      "id": "gravitational_energy",
+      "name": "Gravitational potential energy far from Earth, U = −GMm/r, and escape speed",
+      "prerequisites": ["energy_conservation"]
+    },
+    {
+      "id": "power",
+      "name": "Power: P = ΔE/Δt on average, P = Fv at an instant",
+      "prerequisites": ["work_constant_force"]
+    },
+    {
+      "id": "momentum_impulse",
+      "name": "Momentum p = mv and impulse J = ∫F dt = Δp",
+      "prerequisites": []
+    },
+    {
+      "id": "center_of_mass",
+      "name": "Center of mass of a system, and its velocity",
+      "prerequisites": ["momentum_impulse"]
+    },
+    {
+      "id": "momentum_conservation",
+      "name": "Conservation of momentum in collisions and explosions, in 1D and 2D",
+      "prerequisites": ["momentum_impulse"]
+    },
+    {
+      "id": "collision_types",
+      "name": "Elastic or inelastic: is kinetic energy kept in a collision?",
+      "prerequisites": ["momentum_conservation", "kinetic_energy"]
+    },
+    {
+      "id": "multi_stage",
+      "name": "Split a problem into stages: a collision (momentum) then a motion (energy)",
+      "prerequisites": ["collision_types", "energy_conservation"]
+    }
+  ],
+  "problems": [
+    {
+      "id": "push_cart",
+      "prompt": "A 2.0 kg cart starts at rest on a frictionless track. You push it with a constant 10 N horizontal force for 3.0 m.",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "Which idea links the push to the cart's final speed, without needing the time?",
+          "kind": "choice",
+          "options": [
+            "Net work equals the change in kinetic energy",
+            "Momentum is conserved",
+            "Mechanical energy is conserved"
+          ],
+          "answer": "Net work equals the change in kinetic energy",
+          "hint": "You know a force and a distance. Force times distance is work, and work changes kinetic energy. Momentum is not conserved: your push is an outside force.",
+          "skill": "work_energy_theorem"
+        },
+        {
+          "prompt": "How much work, in joules, does your push do on the cart?",
+          "kind": "number",
+          "answer": 30,
+          "hint": "The force points along the motion, so W = Fd = 10 × 3.0.",
+          "skill": "work_constant_force"
+        },
+        {
+          "prompt": "What is the cart's final speed, in m/s?",
+          "kind": "number",
+          "answer": 5.48,
+          "tolerance": 0.05,
+          "hint": "All 30 J becomes kinetic energy: ½(2.0)v² = 30, so v = √30.",
+          "skill": "kinetic_energy"
+        }
+      ]
+    },
+    {
+      "id": "drag_crate",
+      "prompt": "A 15 kg crate starts at rest. A rope pulls it 8.0 m across a level floor with a 50 N force at 37° above the horizontal. Friction on the crate is 30 N. Use cos 37° = 4/5.",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "How much work, in joules, does the rope do on the crate?",
+          "kind": "number",
+          "answer": 320,
+          "hint": "Only the part of the force along the motion does work: W = Fd cos θ = 50 × 8.0 × 4/5.",
+          "skill": "work_constant_force"
+        },
+        {
+          "prompt": "Is the work done by friction on the crate positive, negative or zero?",
+          "kind": "choice",
+          "options": [
+            "Negative, because friction points opposite the motion",
+            "Positive, because the crate moves",
+            "Zero, because friction is not a push or a pull"
+          ],
+          "answer": "Negative, because friction points opposite the motion",
+          "hint": "Work is negative when the force points against the motion (cos 180° = −1).",
+          "skill": "work_constant_force"
+        },
+        {
+          "prompt": "How much work, in joules, does friction do on the crate? Include the sign.",
+          "kind": "number",
+          "answer": -240,
+          "hint": "W = 30 × 8.0 × cos 180°.",
+          "skill": "work_constant_force"
+        },
+        {
+          "prompt": "How much work, in joules, does gravity do on the crate?",
+          "kind": "number",
+          "answer": 0,
+          "hint": "Gravity points down and the crate moves sideways: the angle is 90°, and cos 90° = 0.",
+          "skill": "work_constant_force"
+        },
+        {
+          "prompt": "What is the crate's speed after the 8.0 m, in m/s?",
+          "kind": "number",
+          "answer": 3.27,
+          "tolerance": 0.05,
+          "hint": "Net work = 320 − 240 = 80 J, and it all becomes kinetic energy: ½(15)v² = 80.",
+          "skill": "work_energy_theorem"
+        }
+      ]
+    },
+    {
+      "id": "changing_force",
+      "prompt": "A 3.0 kg block starts at rest on a frictionless surface. A force F(x) = 6x² (in newtons, with x in meters) pushes it along the x-axis from x = 0 to x = 2.0 m.",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "How do you find the work done by this force?",
+          "kind": "choice",
+          "options": [
+            "Integrate F(x) dx from x = 0 to x = 2.0 m",
+            "Multiply the force at x = 2.0 m by 2.0 m",
+            "Multiply the average of F(0) and F(2.0) by 2.0 m"
+          ],
+          "answer": "Integrate F(x) dx from x = 0 to x = 2.0 m",
+          "hint": "The force changes as the block moves, so add up F dx over every small bit of the path. Averaging the two ends only works for a straight-line force.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "How much work, in joules, does the force do?",
+          "kind": "number",
+          "answer": 16,
+          "hint": "∫6x² dx = 2x³. Evaluate from 0 to 2.0: 2(8) − 0.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "What is the block's speed at x = 2.0 m, in m/s?",
+          "kind": "number",
+          "answer": 3.27,
+          "tolerance": 0.05,
+          "hint": "The 16 J of work becomes kinetic energy: ½(3.0)v² = 16.",
+          "skill": "work_energy_theorem"
+        }
+      ]
+    },
+    {
+      "id": "spring_launch",
+      "prompt": "A spring with k = 500 N/m is squeezed 0.15 m and launches a 0.20 kg block along a frictionless level track, which then curves up a frictionless ramp. Use g = 9.8 m/s².",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "Put the forms of energy in the order the block has them, starting from the squeezed spring.",
+          "kind": "order",
+          "answer": [
+            "Energy stored in the spring",
+            "Kinetic energy on the level track",
+            "Gravitational potential energy at the highest point on the ramp"
+          ],
+          "hint": "The spring pushes the block (spring energy becomes motion), then the block slows as it climbs (motion becomes height).",
+          "skill": "energy_conservation"
+        },
+        {
+          "prompt": "How much energy, in joules, is stored in the squeezed spring?",
+          "kind": "number",
+          "answer": 5.63,
+          "tolerance": 0.05,
+          "hint": "U = ½kx² = ½ × 500 × 0.15².",
+          "skill": "potential_energy"
+        },
+        {
+          "prompt": "What is the block's speed on the level track, in m/s?",
+          "kind": "number",
+          "answer": 7.5,
+          "tolerance": 0.05,
+          "hint": "All the spring energy becomes kinetic energy: ½(0.20)v² = 5.625.",
+          "skill": "energy_conservation"
+        },
+        {
+          "prompt": "How high up the ramp does the block rise, in meters?",
+          "kind": "number",
+          "answer": 2.87,
+          "tolerance": 0.03,
+          "hint": "All the energy becomes gravitational potential energy: mgh = 5.625, so h = 5.625 / (0.20 × 9.8).",
+          "skill": "energy_conservation"
+        },
+        {
+          "prompt": "If the spring were squeezed twice as far (0.30 m), how would the height change?",
+          "kind": "choice",
+          "options": [
+            "4 times as high",
+            "2 times as high",
+            "The same height"
+          ],
+          "answer": "4 times as high",
+          "hint": "Spring energy is ½kx². Doubling x makes x² four times bigger, and the height follows the energy.",
+          "skill": "potential_energy"
+        }
+      ]
+    },
+    {
+      "id": "pendulum_swing",
+      "prompt": "A 0.50 kg ball hangs on a 1.2 m string. It is pulled aside until the string makes 60° with the vertical, then released from rest. Use g = 9.8 m/s².",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "How far, in meters, does the ball drop from its release point to the bottom of the swing?",
+          "kind": "number",
+          "answer": 0.6,
+          "tolerance": 0.01,
+          "hint": "The drop is L − L cos 60° = 1.2(1 − 0.5).",
+          "skill": "potential_energy"
+        },
+        {
+          "prompt": "Which idea gives the ball's speed at the bottom?",
+          "kind": "choice",
+          "options": [
+            "Mechanical energy is conserved, because the string's pull does no work",
+            "Momentum is conserved, because nothing hits the ball",
+            "The speed stays the same, because the string's pull cancels gravity"
+          ],
+          "answer": "Mechanical energy is conserved, because the string's pull does no work",
+          "hint": "The string always pulls at right angles to the ball's motion, so it does no work. Only gravity does work, and gravity's work is already counted as potential energy.",
+          "skill": "energy_conservation"
+        },
+        {
+          "prompt": "What is the ball's speed at the bottom, in m/s?",
+          "kind": "number",
+          "answer": 3.43,
+          "tolerance": 0.05,
+          "hint": "mgh = ½mv², so v = √(2gh) = √(2 × 9.8 × 0.6).",
+          "skill": "energy_conservation"
+        }
+      ]
+    },
+    {
+      "id": "rough_ramp",
+      "prompt": "A 4.0 kg block starts at rest and slides 5.0 m down a ramp tilted 30° above the horizontal. The coefficient of kinetic friction is 0.20. Use g = 9.8 m/s².",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "How far, in meters, does the block drop vertically?",
+          "kind": "number",
+          "answer": 2.5,
+          "hint": "The vertical drop is the distance along the ramp times sin 30°.",
+          "skill": "potential_energy"
+        },
+        {
+          "prompt": "What is the size of the friction force, in newtons?",
+          "kind": "number",
+          "answer": 6.79,
+          "tolerance": 0.05,
+          "hint": "Friction = μN, and on a ramp the normal force is mg cos 30°, not mg. So 0.20 × 4.0 × 9.8 × cos 30°.",
+          "skill": "newtons_laws"
+        },
+        {
+          "prompt": "How much work, in joules, does friction do on the block? Include the sign.",
+          "kind": "number",
+          "answer": -33.95,
+          "tolerance": 0.3,
+          "hint": "Friction points up the ramp while the block moves down it: W = −6.79 × 5.0.",
+          "skill": "nonconservative_work"
+        },
+        {
+          "prompt": "What is the block's speed at the bottom, in m/s?",
+          "kind": "number",
+          "answer": 5.66,
+          "tolerance": 0.05,
+          "hint": "Start energy plus friction's work gives end energy: mgh + W_friction = ½mv². So ½(4.0)v² = 98 − 33.95.",
+          "skill": "nonconservative_work"
+        }
+      ]
+    },
+    {
+      "id": "energy_curve",
+      "prompt": "A 1.0 kg particle moves along the x-axis. Its potential energy is U(x) = 2x³ − 6x, in joules, with x in meters. No other forces act on it.",
+      "difficulty": 3,
+      "steps": [
+        {
+          "prompt": "How is the force on the particle found from U(x)?",
+          "kind": "choice",
+          "options": [
+            "F = −dU/dx",
+            "F = dU/dx",
+            "F = −∫U dx"
+          ],
+          "answer": "F = −dU/dx",
+          "hint": "Force points downhill on the U(x) curve, which is the way U decreases. That is what the minus sign does.",
+          "skill": "force_from_potential"
+        },
+        {
+          "prompt": "What is the force on the particle at x = 2.0 m, in newtons? Include the sign.",
+          "kind": "number",
+          "answer": -18,
+          "hint": "dU/dx = 6x² − 6, which is 18 at x = 2. Then F = −dU/dx.",
+          "skill": "force_from_potential"
+        },
+        {
+          "prompt": "At what positive x, in meters, is the particle in equilibrium (zero force)?",
+          "kind": "number",
+          "answer": 1,
+          "hint": "Set dU/dx = 6x² − 6 equal to 0 and keep the positive answer.",
+          "skill": "force_from_potential"
+        },
+        {
+          "prompt": "Is the equilibrium at x = 1 m stable or unstable?",
+          "kind": "choice",
+          "options": [
+            "Stable, because U has a minimum there",
+            "Unstable, because U has a maximum there",
+            "Neither, because the force is not zero there"
+          ],
+          "answer": "Stable, because U has a minimum there",
+          "hint": "The second derivative, 12x, is positive at x = 1, so U curves upward there: a valley. A particle nudged out of a valley is pushed back.",
+          "skill": "force_from_potential"
+        },
+        {
+          "prompt": "The particle is released from rest at x = 0 and moves right. What is its speed at x = 1 m, in m/s?",
+          "kind": "number",
+          "answer": 2.83,
+          "tolerance": 0.05,
+          "hint": "U(0) = 0 and U(1) = −4 J, so 4 J of potential energy became kinetic energy: ½(1.0)v² = 4.",
+          "skill": "energy_conservation"
+        }
+      ]
+    },
+    {
+      "id": "escape_earth",
+      "prompt": "Find the speed needed for an object to escape Earth completely (ignore air resistance). Earth's mass is 5.97 × 10²⁴ kg and its radius is 6.37 × 10⁶ m. G = 6.67 × 10⁻¹¹ N·m²/kg².",
+      "difficulty": 3,
+      "steps": [
+        {
+          "prompt": "Which formula gives gravitational potential energy when the distance from Earth's center changes a lot?",
+          "kind": "choice",
+          "options": [
+            "U = −GMm/r",
+            "U = mgh",
+            "U = GMm/r²"
+          ],
+          "answer": "U = −GMm/r",
+          "hint": "mgh only works close to the surface, where g barely changes. GMm/r² is the force, not the energy.",
+          "skill": "gravitational_energy"
+        },
+        {
+          "prompt": "To just barely escape, what must the object's total energy K + U be at launch?",
+          "kind": "choice",
+          "options": [
+            "Zero",
+            "Negative",
+            "Equal to mgR"
+          ],
+          "answer": "Zero",
+          "hint": "Very far away, U is 0, and an object that barely makes it arrives with K = 0. Total energy stays the same, so it was 0 at launch too.",
+          "skill": "gravitational_energy"
+        },
+        {
+          "prompt": "What is the escape speed, in km/s?",
+          "kind": "number",
+          "answer": 11.18,
+          "tolerance": 0.05,
+          "hint": "½mv² − GMm/R = 0 gives v = √(2GM/R). Divide the answer in m/s by 1000.",
+          "skill": "gravitational_energy"
+        }
+      ]
+    },
+    {
+      "id": "stair_climb",
+      "prompt": "A 70 kg student runs up stairs that rise 4.0 m in 5.0 s. Use g = 9.8 m/s².",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "By how much, in joules, does the student's gravitational potential energy increase?",
+          "kind": "number",
+          "answer": 2744,
+          "tolerance": 5,
+          "hint": "ΔU = mgΔy = 70 × 9.8 × 4.0.",
+          "skill": "potential_energy"
+        },
+        {
+          "prompt": "What is the student's average power, in watts?",
+          "kind": "number",
+          "answer": 548.8,
+          "tolerance": 2,
+          "hint": "Average power is energy divided by time: 2744 J / 5.0 s.",
+          "skill": "power"
+        },
+        {
+          "prompt": "With a 10 kg backpack, at the same power, how long would the climb take, in seconds?",
+          "kind": "number",
+          "answer": 5.71,
+          "tolerance": 0.05,
+          "hint": "The energy needed is now 80 × 9.8 × 4.0 = 3136 J. Time = energy / power = 3136 / 548.8.",
+          "skill": "power"
+        }
+      ]
+    },
+    {
+      "id": "car_power",
+      "prompt": "A 1200 kg car drives on a level road at 25 m/s. Air resistance and rolling friction together push back on it with 800 N.",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "At a steady 25 m/s, how big is the driving force from the road on the tires, in newtons?",
+          "kind": "number",
+          "answer": 800,
+          "hint": "Steady speed means zero acceleration, so the forward force exactly balances the 800 N pushing back.",
+          "skill": "newtons_laws"
+        },
+        {
+          "prompt": "What power, in kilowatts, must the engine deliver?",
+          "kind": "number",
+          "answer": 20,
+          "hint": "P = Fv = 800 × 25 watts. Divide by 1000 for kilowatts.",
+          "skill": "power"
+        },
+        {
+          "prompt": "At the moment the car is at 25 m/s, the driver begins speeding up at 0.50 m/s². What forward force, in newtons, is needed then?",
+          "kind": "number",
+          "answer": 1400,
+          "hint": "Forward force − 800 = ma = 1200 × 0.50.",
+          "skill": "newtons_laws"
+        },
+        {
+          "prompt": "What power, in kilowatts, is the engine delivering at that moment?",
+          "kind": "number",
+          "answer": 35,
+          "hint": "P = Fv = 1400 × 25 watts.",
+          "skill": "power"
+        }
+      ]
+    },
+    {
+      "id": "bat_hits_ball",
+      "prompt": "A 0.15 kg baseball moving at 40 m/s is hit straight back at 50 m/s. The bat touches the ball for 1.5 ms (0.0015 s). Take the ball's direction after the hit as positive.",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "What is the ball's velocity before the hit?",
+          "kind": "choice",
+          "options": [
+            "−40 m/s",
+            "+40 m/s",
+            "0 m/s"
+          ],
+          "answer": "−40 m/s",
+          "hint": "Before the hit the ball moves opposite the positive direction, so its velocity is negative.",
+          "skill": "momentum_impulse"
+        },
+        {
+          "prompt": "What is the change in the ball's momentum, in kg·m/s?",
+          "kind": "number",
+          "answer": 13.5,
+          "hint": "Δp = m(v_after − v_before) = 0.15 × (50 − (−40)). Subtracting a negative adds.",
+          "skill": "momentum_impulse"
+        },
+        {
+          "prompt": "What is the average force of the bat on the ball, in newtons?",
+          "kind": "number",
+          "answer": 9000,
+          "tolerance": 10,
+          "hint": "Impulse = FΔt = Δp, so F = 13.5 / 0.0015.",
+          "skill": "momentum_impulse"
+        }
+      ]
+    },
+    {
+      "id": "force_over_time",
+      "prompt": "A 2.0 kg object starts at rest. A force F(t) = 12t − 3t² (in newtons, with t in seconds) pushes it in one direction from t = 0 to t = 4.0 s.",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "How do you find the impulse from this force?",
+          "kind": "choice",
+          "options": [
+            "Integrate F(t) dt from t = 0 to t = 4.0 s",
+            "Multiply the largest force by 4.0 s",
+            "Multiply the force at t = 4.0 s by 4.0 s"
+          ],
+          "answer": "Integrate F(t) dt from t = 0 to t = 4.0 s",
+          "hint": "The force changes over time, so add up F dt over every small bit of time. That is the area under the F–t graph.",
+          "skill": "momentum_impulse"
+        },
+        {
+          "prompt": "What is the impulse, in N·s?",
+          "kind": "number",
+          "answer": 32,
+          "hint": "∫(12t − 3t²) dt = 6t² − t³. At t = 4: 96 − 64.",
+          "skill": "momentum_impulse"
+        },
+        {
+          "prompt": "What is the object's speed at t = 4.0 s, in m/s?",
+          "kind": "number",
+          "answer": 16,
+          "hint": "Impulse = Δp = mv − 0, so v = 32 / 2.0.",
+          "skill": "momentum_impulse"
+        }
+      ]
+    },
+    {
+      "id": "car_hits_truck",
+      "prompt": "A 1500 kg car moving at 20 m/s hits a parked 2500 kg truck. They lock together and slide as one.",
+      "difficulty": 1,
+      "steps": [
+        {
+          "prompt": "During this collision, what is conserved?",
+          "kind": "choice",
+          "options": [
+            "Total momentum only",
+            "Total kinetic energy only",
+            "Both total momentum and total kinetic energy"
+          ],
+          "answer": "Total momentum only",
+          "hint": "Momentum is conserved in every collision with no outside push. Vehicles that stick together lose kinetic energy to crumpling and heat.",
+          "skill": "collision_types"
+        },
+        {
+          "prompt": "What is their speed just after the collision, in m/s?",
+          "kind": "number",
+          "answer": 7.5,
+          "hint": "Momentum before = 1500 × 20 = 30,000 kg·m/s. After, it is shared by 4000 kg.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "How much kinetic energy is lost in the collision, in kilojoules?",
+          "kind": "number",
+          "answer": 187.5,
+          "tolerance": 0.5,
+          "hint": "Before: ½ × 1500 × 20² = 300 kJ. After: ½ × 4000 × 7.5² = 112.5 kJ. Subtract.",
+          "skill": "collision_types"
+        }
+      ]
+    },
+    {
+      "id": "explosion",
+      "prompt": "A 3.0 kg object sits at rest, then breaks apart into two pieces. The 1.0 kg piece flies east at 12 m/s. Take east as positive.",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "What is the total momentum of the two pieces just after the break, in kg·m/s?",
+          "kind": "number",
+          "answer": 0,
+          "hint": "The pieces only push on each other, so total momentum stays what it was before: the object was at rest.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "What is the velocity of the 2.0 kg piece, in m/s? Include the sign.",
+          "kind": "number",
+          "answer": -6,
+          "hint": "1.0 × 12 + 2.0 × v = 0.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "What is the velocity of the center of mass of the two pieces after the break, in m/s?",
+          "kind": "number",
+          "answer": 0,
+          "hint": "v_cm = total momentum / total mass, and the total momentum is 0.",
+          "skill": "center_of_mass"
+        },
+        {
+          "prompt": "How much kinetic energy did the break release, in joules?",
+          "kind": "number",
+          "answer": 108,
+          "hint": "½ × 1.0 × 12² + ½ × 2.0 × 6² = 72 + 36.",
+          "skill": "kinetic_energy"
+        }
+      ]
+    },
+    {
+      "id": "elastic_head_on",
+      "prompt": "A 2.0 kg ball moving right at 6.0 m/s hits a 4.0 kg ball at rest, head-on. The collision is elastic. Take right as positive.",
+      "difficulty": 2,
+      "steps": [
+        {
+          "prompt": "Which facts together let you solve an elastic collision?",
+          "kind": "choice",
+          "options": [
+            "Total momentum and total kinetic energy are both conserved",
+            "Only total momentum is conserved",
+            "Only total kinetic energy is conserved"
+          ],
+          "answer": "Total momentum and total kinetic energy are both conserved",
+          "hint": "There are two unknown final velocities, so you need two equations. Elastic means kinetic energy is kept as well as momentum.",
+          "skill": "collision_types"
+        },
+        {
+          "prompt": "What is the 2.0 kg ball's velocity after the collision, in m/s? Include the sign.",
+          "kind": "number",
+          "answer": -2,
+          "hint": "For an elastic hit on a ball at rest: v₁ = (m₁ − m₂)/(m₁ + m₂) × 6.0 = (−2/6) × 6.0. A light ball bounces back off a heavy one.",
+          "skill": "collision_types"
+        },
+        {
+          "prompt": "What is the 4.0 kg ball's velocity after the collision, in m/s?",
+          "kind": "number",
+          "answer": 4,
+          "hint": "Use momentum: 2.0 × 6.0 = 2.0 × (−2) + 4.0 × v₂.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "Check: what is the total kinetic energy after the collision, in joules?",
+          "kind": "number",
+          "answer": 36,
+          "hint": "½ × 2.0 × 2² + ½ × 4.0 × 4² = 4 + 32. It should equal the 36 J before, because the collision is elastic.",
+          "skill": "collision_types"
+        }
+      ]
+    },
+    {
+      "id": "pucks_2d",
+      "prompt": "A 0.50 kg puck slides east at 4.0 m/s on frictionless ice and hits an identical puck at rest. Afterward, the first puck moves at 2.0 m/s, 60° north of east. Take east as +x and north as +y.",
+      "difficulty": 3,
+      "steps": [
+        {
+          "prompt": "In a collision in two dimensions, how is momentum conserved?",
+          "kind": "choice",
+          "options": [
+            "Separately in the x direction and in the y direction",
+            "Only along the first puck's starting direction",
+            "Only as a total speed, ignoring directions"
+          ],
+          "answer": "Separately in the x direction and in the y direction",
+          "hint": "Momentum is a vector. Each direction keeps its own total.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "What is the second puck's x-velocity after the collision, in m/s?",
+          "kind": "number",
+          "answer": 3,
+          "hint": "The masses are equal, so velocities add up: 4.0 = 2.0 cos 60° + v₂ₓ.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "What is the second puck's y-velocity after the collision, in m/s? Include the sign.",
+          "kind": "number",
+          "answer": -1.73,
+          "tolerance": 0.03,
+          "hint": "There was no y-momentum before, so 0 = 2.0 sin 60° + v₂ᵧ.",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "What is the second puck's speed, in m/s?",
+          "kind": "number",
+          "answer": 3.46,
+          "tolerance": 0.03,
+          "hint": "Speed = √(vₓ² + vᵧ²) = √(3.0² + 1.73²).",
+          "skill": "momentum_conservation"
+        },
+        {
+          "prompt": "Was this collision elastic?",
+          "kind": "choice",
+          "options": [
+            "Yes, the total kinetic energy is the same before and after",
+            "No, some kinetic energy was lost",
+            "There is no way to tell without the collision time"
+          ],
+          "answer": "Yes, the total kinetic energy is the same before and after",
+          "hint": "Before: ½ × 0.50 × 4.0² = 4.0 J. After: ½ × 0.50 × 2.0² + ½ × 0.50 × 3.46² = 1.0 + 3.0 J.",
+          "skill": "collision_types"
+        }
+      ]
+    },
+    {
+      "id": "ballistic_pendulum",
+      "prompt": "A 0.010 kg bullet is fired into a 2.0 kg wooden block hanging from strings, and stays inside it. The block and bullet swing up, rising 0.20 m. Find the bullet's speed. Use g = 9.8 m/s².",
+      "difficulty": 3,
+      "steps": [
+        {
+          "prompt": "Put the stages of what happens in order.",
+          "kind": "order",
+          "answer": [
+            "The bullet hits the block and stops inside it (momentum is conserved)",
+            "The block and bullet swing upward together (mechanical energy is conserved)",
+            "The block and bullet stop for an instant at the top of the swing"
+          ],
+          "hint": "Split the event into the quick collision and the slower swing that follows. Each stage keeps a different quantity.",
+          "skill": "multi_stage"
+        },
+        {
+          "prompt": "Why can't you use energy conservation all the way from the moving bullet to the top of the swing?",
+          "kind": "choice",
+          "options": [
+            "Kinetic energy is lost when the bullet sticks in the block",
+            "Gravity does no work during the swing",
+            "The strings do work on the block during the swing"
+          ],
+          "answer": "Kinetic energy is lost when the bullet sticks in the block",
+          "hint": "A collision where things stick is inelastic: most of the bullet's kinetic energy turns into heat and damage to the wood.",
+          "skill": "collision_types"
+        },
+        {
+          "prompt": "What is the speed of the block and bullet just after the collision, in m/s?",
+          "kind": "number",
+          "answer": 1.98,
+          "tolerance": 0.03,
+          "hint": "During the swing, energy is conserved: ½v² = gh, so v = √(2 × 9.8 × 0.20).",
+          "skill": "energy_conservation"
+        },
+        {
+          "prompt": "What was the bullet's speed before it hit, in m/s?",
+          "kind": "number",
+          "answer": 398,
+          "tolerance": 1.5,
+          "hint": "During the collision, momentum is conserved: 0.010 × v = (0.010 + 2.0) × 1.98.",
+          "skill": "momentum_conservation"
+        }
+      ]
+    },
+    {
+      "id": "skaters_rope",
+      "prompt": "Two skaters stand at rest on frictionless ice, 10 m apart, holding a rope between them. Skater A is 60 kg and skater B is 40 kg. They pull on the rope until they meet.",
+      "difficulty": 3,
+      "steps": [
+        {
+          "prompt": "With no outside horizontal force, what does the center of mass of the two skaters do?",
+          "kind": "choice",
+          "options": [
+            "It stays where it is",
+            "It moves toward the heavier skater",
+            "It moves toward the lighter skater"
+          ],
+          "answer": "It stays where it is",
+          "hint": "The rope's pulls are inside the system. With no outside force, the center of mass keeps its velocity, which is zero here.",
+          "skill": "center_of_mass"
+        },
+        {
+          "prompt": "How far from skater A's starting spot do they meet, in meters?",
+          "kind": "number",
+          "answer": 4,
+          "hint": "They meet at the center of mass: x_cm = (60 × 0 + 40 × 10) / 100, measured from skater A.",
+          "skill": "center_of_mass"
+        },
+        {
+          "prompt": "At one moment skater A moves at 0.80 m/s. How fast is skater B moving then, in m/s?",
+          "kind": "number",
+          "answer": 1.2,
+          "hint": "Total momentum stays zero: 60 × 0.80 = 40 × v_B.",
+          "skill": "momentum_conservation"
+        }
+      ]
+    },
+    {
+      "id": "uneven_rod",
+      "prompt": "A thin rod lies along the x-axis from x = 0 to x = 2.0 m. It gets heavier toward one end: its mass per meter is λ = 3x kg/m.",
+      "difficulty": 3,
+      "steps": [
+        {
+          "prompt": "What is the rod's total mass, in kg?",
+          "kind": "number",
+          "answer": 6,
+          "hint": "M = ∫λ dx = ∫3x dx = 1.5x², from 0 to 2.0.",
+          "skill": "center_of_mass"
+        },
+        {
+          "prompt": "Which expression gives the rod's center of mass?",
+          "kind": "choice",
+          "options": [
+            "x_cm = (∫x λ dx) / M",
+            "x_cm = 2.0 m / 2",
+            "x_cm = (∫λ dx) / 2.0 m"
+          ],
+          "answer": "x_cm = (∫x λ dx) / M",
+          "hint": "Each small piece dm = λ dx counts with weight x. The middle of the rod is only right when the rod is the same all along.",
+          "skill": "center_of_mass"
+        },
+        {
+          "prompt": "Where is the center of mass, in meters from x = 0?",
+          "kind": "number",
+          "answer": 1.33,
+          "tolerance": 0.02,
+          "hint": "∫3x² dx = x³, which is 8 from 0 to 2.0. Then x_cm = 8 / 6.",
+          "skill": "center_of_mass"
+        }
+      ]
+    }
+  ]
+}

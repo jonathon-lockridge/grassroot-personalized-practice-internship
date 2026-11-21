@@ -7,20 +7,22 @@ import pytest
 
 from practice_engine.models import Course, load_course, validate_course
 
-# The tiny course file, found from this test file's own location: parents[1] is two
-# folders up (out of tests/ to the project root), then data/linear-equations/course.json.
-TINY_COURSE = Path(__file__).resolve().parents[1] / "data" / "linear-equations" / "course.json"
+# The course file, found from this test file's own location: parents[1] is two folders
+# up (out of tests/ to the project root), then data/ap-physics-c-energy-momentum/course.json.
+COURSE = (
+    Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
+)
 
 
-def test_tiny_course_loads_and_is_sound() -> None:
-    course = load_course(TINY_COURSE)
+def test_physics_course_is_full_size_and_sound() -> None:
+    course = load_course(COURSE)
 
-    assert course.id == "linear-equations"
-    assert len(course.skills) >= 2  # the course only grows from here (T1b)
-    assert len(course.problems) >= 2
-    # The tiny course must use all three answer kinds (TODO T1a asks for that).
+    assert len(course.skills) >= 8
+    assert len(course.problems) >= 10
     kinds_used = {step.kind for problem in course.problems for step in problem.steps}
     assert kinds_used == {"choice", "number", "order"}
+    # Every difficulty is used, so the engine can move a student up or down.
+    assert {problem.difficulty for problem in course.problems} == {1, 2, 3}
     assert validate_course(course) == []
 
 
@@ -28,7 +30,7 @@ def test_tiny_course_loads_and_is_sound() -> None:
 
 
 def test_step_naming_a_missing_skill_is_reported() -> None:
-    course = load_course(TINY_COURSE)
+    course = load_course(COURSE)
     course.problems[0].steps[0].skill = "does_not_exist"
 
     complaints = validate_course(course)
@@ -38,7 +40,7 @@ def test_step_naming_a_missing_skill_is_reported() -> None:
 
 
 def test_prerequisite_loop_is_reported() -> None:
-    course = load_course(TINY_COURSE)
+    course = load_course(COURSE)
     first, second = course.skills[0], course.skills[1]
     first.prerequisites = [second.id]
     second.prerequisites = [first.id]
@@ -50,7 +52,7 @@ def test_prerequisite_loop_is_reported() -> None:
 
 
 def test_choice_answer_must_be_one_of_the_options() -> None:
-    course = load_course(TINY_COURSE)
+    course = load_course(COURSE)
     # The first step anywhere in the course whose kind is "choice".
     choice_step = next(
         step for problem in course.problems for step in problem.steps if step.kind == "choice"
@@ -63,11 +65,11 @@ def test_choice_answer_must_be_one_of_the_options() -> None:
     assert any("not one of the options" in complaint for complaint in complaints)
 
 
-# One row per remaining rule: how to break the tiny course, and words the complaint must
+# One row per remaining rule: how to break the course, and words the complaint must
 # contain. Each row becomes its own test.
 OTHER_BREAKAGES = [
     ("empty course", lambda c: (c.skills.clear(), c.problems.clear()), "no skills"),
-    ("bad skill id", lambda c: setattr(c.skills[0], "id", "Undo Addition"), "lowercase"),
+    ("bad skill id", lambda c: setattr(c.skills[0], "id", "Kinetic Energy"), "lowercase"),
     ("empty problem id", lambda c: setattr(c.problems[0], "id", ""), "lowercase"),
     ("empty skill name", lambda c: setattr(c.skills[0], "name", "   "), "empty name"),
     ("missing prerequisite", lambda c: setattr(c.skills[1], "prerequisites", ["nope"]), "nope"),
@@ -96,12 +98,14 @@ OTHER_BREAKAGES = [
     ),
     (
         "one option",
-        lambda c: setattr(c.problems[0].steps[0], "options", ["Subtract 7"]),
+        lambda c: setattr(c.problems[0].steps[0], "options", ["Mechanical energy is conserved"]),
         "at least 2 options",
     ),
     (
         "repeated option",
-        lambda c: setattr(c.problems[0].steps[0], "options", ["Subtract 7", "subtract 7 "]),
+        lambda c: setattr(
+            c.problems[0].steps[0], "options", ["Momentum is conserved", "momentum is conserved "]
+        ),
         "more than once",
     ),
     ("quoted number", lambda c: setattr(c.problems[0].steps[1], "answer", "5"), "without quotes"),
@@ -116,13 +120,23 @@ OTHER_BREAKAGES = [
         "more than two decimals",
     ),
     (
+        "tolerance on a choice step",
+        lambda c: setattr(c.problems[0].steps[0], "tolerance", 0.1),
+        "only 'number' steps may have a tolerance",
+    ),
+    (
+        "zero tolerance",
+        lambda c: setattr(c.problems[0].steps[1], "tolerance", 0),
+        "tolerance must be a number above 0",
+    ),
+    (
         "one item to order",
-        lambda c: setattr(c.problems[1].steps[0], "answer", ["only one"]),
+        lambda c: setattr(c.problems[3].steps[0], "answer", ["only one"]),
         "at least 2 items",
     ),
     (
         "repeated item to order",
-        lambda c: setattr(c.problems[1].steps[0], "answer", ["Same", "same"]),
+        lambda c: setattr(c.problems[3].steps[0], "answer", ["Same", "same"]),
         "more than once",
     ),
 ]
@@ -134,7 +148,7 @@ OTHER_BREAKAGES = [
     ids=[row[0] for row in OTHER_BREAKAGES],
 )
 def test_other_rules_are_enforced(name: str, break_course, expected_words: str) -> None:
-    course = load_course(TINY_COURSE)
+    course = load_course(COURSE)
     break_course(course)
 
     complaints = validate_course(course)
@@ -146,8 +160,8 @@ def test_other_rules_are_enforced(name: str, break_course, expected_words: str) 
 
 
 def _write_variant(tmp_path: Path, change) -> Path:
-    """Copy the tiny course as plain data, let `change` alter it, and save it to a file."""
-    data = json.loads(TINY_COURSE.read_text())
+    """Copy the course as plain data, let `change` alter it, and save it to a file."""
+    data = json.loads(COURSE.read_text())
     change(data)
     path = tmp_path / "course.json"
     path.write_text(json.dumps(data))
@@ -176,7 +190,7 @@ def test_misspelled_field_name_is_reported(tmp_path: Path) -> None:
 
 def test_broken_json_is_reported_with_a_line_number(tmp_path: Path) -> None:
     path = tmp_path / "course.json"
-    path.write_text('{\n  "id": "linear-equations",,\n}')
+    path.write_text('{\n  "id": "ap-physics-c-energy-momentum",,\n}')
 
     with pytest.raises(ValueError) as error:
         load_course(path)

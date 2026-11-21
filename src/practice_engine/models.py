@@ -30,9 +30,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 STEP_KINDS = ("choice", "number", "order")
 DIFFICULTIES = (1, 2, 3)  # 1 easy, 2 medium, 3 hard
-# Skill and problem ids: lowercase words or digits joined by underscores, like undo_addition.
+# Skill and problem ids: lowercase words or digits joined by underscores, like kinetic_energy.
 ID_PATTERN = re.compile(r"[a-z0-9]+(_[a-z0-9]+)*")
-# A course id matches its folder name, like linear-equations, so hyphens are allowed too.
+# A course id matches its folder name, like ap-physics-c-energy-momentum, so it may use hyphens.
 COURSE_ID_PATTERN = re.compile(r"[a-z0-9]+([-_][a-z0-9]+)*")
 
 
@@ -62,6 +62,9 @@ class Step(CourseShape):
     `kind` says how the student answers:
     - "choice": pick one of `options`; `answer` is the text of the correct option.
     - "number": type a number; `answer` is that number, whole or up to two decimals.
+      `tolerance` (number steps only, may be left out) says how far a typed number
+      may be from the answer and still count as right, such as 0.05 for 5.48
+      (useful when answers are rounded). Left out, the typed number must match.
     - "order": put items in order; `answer` is the list in the correct order, and
       the student sees it shuffled.
     """
@@ -77,6 +80,8 @@ class Step(CourseShape):
     answer: str | bool | int | float | list[str]
     hint: str
     skill: str
+    # Only number steps may have a tolerance; see the kinds above.
+    tolerance: float | None = None
 
 
 class Problem(CourseShape):
@@ -186,14 +191,14 @@ def _check_ids(course: Course) -> list[str]:
     if not COURSE_ID_PATTERN.fullmatch(course.id):
         complaints.append(
             f"Course id '{course.id}' must be lowercase words joined by hyphens, "
-            "like 'linear-equations'."
+            "like 'ap-physics-c-energy-momentum'."
         )
     seen: set[str] = set()  # a set remembers each value once: the ids met so far
     for skill in course.skills:
         if not ID_PATTERN.fullmatch(skill.id):
             complaints.append(
                 f"Skill id '{skill.id}' must be lowercase words joined by underscores, "
-                "like 'undo_addition'."
+                "like 'kinetic_energy'."
             )
         if skill.id in seen:
             complaints.append(f"Skill id '{skill.id}' is used more than once.")
@@ -203,7 +208,7 @@ def _check_ids(course: Course) -> list[str]:
         if not ID_PATTERN.fullmatch(problem.id):
             complaints.append(
                 f"Problem id '{problem.id}' must be lowercase words joined by underscores, "
-                "like 'one_step_add'."
+                "like 'push_cart'."
             )
         if problem.id in seen:
             complaints.append(f"Problem id '{problem.id}' is used more than once.")
@@ -319,7 +324,7 @@ def _check_problems_and_steps(course: Course) -> list[str]:
 
 
 def _check_step(step: Step, where: str) -> list[str]:
-    """Check one step. `where` starts every complaint, like "Problem 'two_step', step 3"."""
+    """Check one step. `where` starts every complaint, like "Problem 'push_cart', step 3"."""
     complaints = []
     if not step.prompt.strip():
         complaints.append(f"{where}: the prompt (the question text) is empty.")
@@ -334,6 +339,8 @@ def _check_step(step: Step, where: str) -> list[str]:
             f"{where}: only 'choice' steps may have options; remove the options line "
             "or change the kind to 'choice'."
         )
+    if step.kind != "number" and step.tolerance is not None:
+        complaints.append(f"{where}: only 'number' steps may have a tolerance.")
     if step.kind == "choice":
         complaints += _check_choice(step, where)
     elif step.kind == "number":
@@ -388,6 +395,9 @@ def _check_number(step: Step, where: str) -> list[str]:
     # Rounding to two decimals changes the number only if it had more than two.
     if round(answer, 2) != answer:
         return [f"{where}: the answer {answer} has more than two decimals."]
+    tolerance = step.tolerance
+    if tolerance is not None and not (math.isfinite(tolerance) and tolerance > 0):
+        return [f"{where}: the tolerance must be a number above 0, not {tolerance}."]
     return []
 
 

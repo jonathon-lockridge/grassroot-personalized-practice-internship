@@ -3,7 +3,7 @@
 *What we're building, for whom, and how we'll know it works. The one document to read. Draft, being reviewed section by section.*
 
 **Owner:** Jonathon, product design intern. **Mentor:** Grassroot Academy's cofounder, who reviews focus and progress at check-ins.
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-19
 
 ## Goal
 
@@ -11,7 +11,9 @@ Build a working demonstration of practice that adapts to the student: problems a
 
 ## What this is and isn't
 
-This is an independent project. It stands on its own, with its own small set of test students, and it is what gets shown and discussed at check-ins. It is designed so it *could* plug into Grassroot's platform later, but nothing here depends on Grassroot's code, data or permission. How a student actually tries it (a web page, or something simpler first) is still open; see decision 6 under *Decisions so far*.
+This is an independent project. It stands on its own, with its own small set of test students, and it is what gets shown and discussed at check-ins. It is designed so it *could* plug into Grassroot's platform later, but nothing here depends on Grassroot's code, data or permission.
+
+The demo is a **mock of Grassroot**: screens that look like Grassroot, where everything except practice is fake. The practice part, both what the student sees and the engine and stored data behind it, is built in full. (Mentor, 2026-11-19.)
 
 ## Background
 
@@ -32,10 +34,10 @@ Students don't know what they don't know. Left to choose, they grind problems th
 
 ## How it works, step by step
 
-1. A student picks a course. At first that's a small hand-made sample course; later, a course generated from a topic or pasted notes.
+1. A student picks a course. First, AP Physics C: Mechanics, energy and momentum (`data/ap-physics-c-energy-momentum/`); later, a course generated from a topic or pasted notes.
 2. The engine picks a problem. The student answers step one, then step two, and so on, each in one of three ways: pick the next step from a few options, type a number, or put steps in order. Each answer is checked immediately. A wrong step gets a hint aimed at that step.
 3. Every step answered is recorded with its skill, right or wrong, time taken and hints used. The engine updates its estimate of the student's mastery of that skill.
-4. The next problem is chosen by rules (see *Decisions so far*) and comes with a one-line reason, such as "Last time you set up the equation right but lost the sign in step 3."
+4. The next problem is chosen by rules (see *Decisions so far*) and comes with a one-line reason, such as "Last time you set up the energy equation right but lost the sign of friction's work in step 3." The screen shows clearly, with a visible marker, when a problem was picked as a follow-up, and which skill and step it targets.
 5. After a practice session the student sees their mastery per skill and the reasons behind the problems they got.
 6. Jonathon reads the record: did the engine flag the step the student actually struggled with?
 7. At a check-in, one working piece is shown and the next focus is agreed.
@@ -56,6 +58,7 @@ Students don't know what they don't know. Left to choose, they grind problems th
 - **Learning, not volume.** Simulated students reach mastery in fewer steps with the engine's order than with a random or a fixed order. With real test students, scores on a short check at the end are higher than on the same check at the start.
 - **Explainable.** Every pick has a reason a student understands.
 - **Works for any course.** Swapping in a second course is a data change, not a code change, and everything still works.
+- **Good for its builder first.** Jonathon practices with it for his own Physics C test and finds the problems and the follow-ups useful before anyone else tries it.
 - **Demo-able.** A stranger can try it for fifteen minutes at a check-in with no explanation from us.
 - **No personal data.** The data holds nicknames only, no names, emails or ages.
 
@@ -83,7 +86,7 @@ Each with the strongest argument against it, so future-us knows why.
 3. **Mastery per skill as a number from 0 to 1, kept by a standard, explainable method (Bayesian Knowledge Tracing: a few fixed numbers nudge the estimate up after a right step and down after a wrong one), updated after every step.** Works from the first answer and learns nothing from student data; its numbers are set by hand. *Against:* the hand-set numbers may be wrong for our problems. *Safeguard:* test on simulated students before real ones; adjust later if needed.
 4. **Next-problem rules:** skills the student is partway through come first (mastery roughly 0.3 to 0.85), prerequisites before what depends on them, revisit skills that are fading, prefer problems at the student's difficulty level, each batch of next problems covers two or three skills, never repeat within a day, always attach a reason. *Against:* rules can feel rigid. *Safeguard:* the rules are a short list we can change in one place, and every pick is recorded with its reason.
 5. **Courses and problem variants can be generated by an AI model, but only into the engine's data format and only after automatic checks.** *Against:* a generated problem with a wrong answer teaches the wrong thing. *Safeguard:* checks before use; generated problems are marked as generated, and a person looks them over. Which AI service, and its cost, is an open question.
-6. **How a student tries it is tentative.** The simplest thing that lets a person answer steps comes first, probably in the terminal (the text-only command window); a web page follows only if it earns its place at a check-in. *Against:* a demo without a screen is less convincing. *Safeguard:* the engine is built so a web page can be added without changing it.
+6. **A web page that mocks Grassroot.** The student practices in a page that looks like Grassroot; only practice works. The page must be easy to use and must show *why* each follow-up problem was picked. Jonathon uses it himself first and keeps redesigning it until it feels right; test users come after (the first design will not be the last). *Against:* building a page costs time the engine could use. *Safeguard:* the rest of the mock stays fake, and the engine works without the page, so tests do not depend on it.
 7. **Python 3.12 with SQLite.** The hard part is the mastery method and checking that it works, which Python is best at. A small web server (FastAPI) is already set up for when a page or a plug-in needs it. *Against:* a second programming language would be needed if Grassroot's app is written in TypeScript and this ever plugs in. *Safeguard:* the four requests in *If it ever plugs into Grassroot* are few enough to rebuild in another language.
 8. **No personal data.** Nicknames only, delete on request. *Against:* none worth the risk.
 
@@ -95,19 +98,18 @@ Grassroot's platform would talk to the engine with four kinds of request, each c
 
 Looked up 2026-11-18. None of these changes the plan; each is something to borrow at a named step.
 
-- **OATutor** (UC Berkeley, open source, github.com/CAHLR/OATutor). The closest thing to this project: a free tutor that keeps mastery per skill with the same method as decision 3, and by default picks the problem whose skills the student is weakest at. Its content (github.com/CAHLR/OATutor-Content, free to reuse if credited, licence CC BY 4.0) has problems with hints for the same OpenStax chapter as our algebra course, lessons 2.1 to 2.5, and its skills for those lessons match our skill list closely. **How we differ:** its steps usually ask only for the final answer, while ours cut each problem into small steps with one skill each; we also add prerequisites, a reason for every pick, and timing. **Use at:** T1b (a source of numbers and hints, credited), T3 (its "weakest skill first" rule as a starting point).
+- **OATutor** (UC Berkeley, open source, github.com/CAHLR/OATutor). The closest thing to this project: a free tutor that keeps mastery per skill with the same method as decision 3, and by default picks the problem whose skills the student is weakest at. **How we differ:** its steps usually ask only for the final answer, while ours cut each problem into small steps with one skill each; we also add prerequisites, a reason for every pick, and timing. **Use at:** T3 (its "weakest skill first" rule as a starting point).
 - **pyBKT** (same Berkeley group, a free Python tool). Works out the four fixed numbers behind decision 3 from real answers instead of setting them by hand, and can make up simulated students. **Use at:** T6 (simulated students), and later to check the hand-set numbers.
 - **Math Academy's "credit flows down" idea.** Getting a hard step right is also quiet practice of the easier skills underneath it, so it can count a little toward them; a miss casts doubt on what is built on top. **Use at:** T2 or T3; see the open question below.
-- **Eedi's misconception data.** Each wrong option in a multiple-choice question is a specific common mistake, such as adding 7 instead of subtracting it. Then a wrong pick says *why* the student is stuck, not only *that* they are. **Use at:** T1b (write wrong options this way), T8 (compare with what students say they struggled with).
+- **Eedi's misconception data.** Each wrong option in a multiple-choice question is a specific common mistake, such as forgetting that friction's work is negative. Then a wrong pick says *why* the student is stuck, not only *that* they are. **Use at:** T1b (write wrong options this way), T8 (compare with what students say they struggled with).
 - **SymPy** (a free Python tool that does algebra). It can solve an equation by itself, so a generated problem's answer can be checked automatically before any student sees it. **Use at:** T7, as part of the checks in decision 5.
 
 ## Open questions
 
-- [x] Which subject for the first hand-made sample course? Algebra: solving linear equations, from the OpenStax Elementary Algebra chapter. Physics comes second, generated in T7, as the test that a new course is only a data change. (Decided 2026-11-14)
+- [x] Which subject for the first hand-made sample course? **AP Physics C: Mechanics, energy and momentum** (Units 3 and 4, plus center of mass), the unit Jonathon is studying now, so he can judge the problems and test them on his own exam. The mentor found linear equations too simple. Problems are ours (or AI-written and checked); course material is Grassroot's job, not ours. (Decided 2026-11-14, changed 2026-11-19 after the mentor meeting)
 - [ ] How often are check-ins, and what does the mentor want to see first? (Jonathon + mentor)
 - [ ] Which AI service for generating courses and variants, and do we have an account with it (which gives a secret access code, the key) and a budget? Needed by step T7. (Jonathon)
-- [ ] Web page or not? Decided at step T4 after trying the simplest version. (Jonathon)
+- [x] Web page or not? Yes: a page that mocks Grassroot, with only practice working. (Mentor, 2026-11-19)
 - [ ] How many test students can we get, and when? Needed by step T8. (Jonathon)
 - [ ] Should this eventually plug into Grassroot? Ask once there is something to show. (mentor)
-- [x] Reuse OATutor's problems, or write every problem by hand? A narrow mix. The last three T1b problems, and later ones, may take **only the equation and its final answer** from OATutor (lessons 2.3 to 2.5). We write every step, option, hint and skill tag ourselves and check them with the step checklist; OATutor's hints are never copied, because a spot check found mistakes in them (one called the LCD the "largest" common denominator). Each borrowed equation is credited in `data/linear-equations/SOURCES.md` (OATutor id, "OpenStax Elementary Algebra 2e, CC BY 4.0, via OATutor, rewritten into steps"); the 7 existing problems stay as they are. At T7, OATutor equations become test material for generated courses, and the credit can move into a field in the course file next to the "generated" mark. Anything written about the project says exactly what was ours: the step breakdowns, and which equations were adapted. *Why not just use OATutor?* It tags a whole problem with one skill and mostly checks only the final answer, so it can't tell that a student who missed a fractions problem actually failed at finding the common denominator; our step-level skills can. (Decided 2026-11-18 by a three-judge review, all three agreeing.)
 - [ ] When a student gets a step right, should the skills underneath it also rise a little? Decide in T2 or T3. (Jonathon)
