@@ -1,12 +1,21 @@
-"""Checks for the mastery update (step T2)."""
+"""Checks for the mastery update (step T2 and its follow-up)."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from practice_engine.mastery import START_MASTERY, new_mastery_state, update_mastery
-from practice_engine.models import StepAnswer, load_course
+from practice_engine.mastery import (
+    MASTERED,
+    MASTERY_STREAK,
+    START_MASTERY,
+    chance_correct,
+    is_mastered,
+    new_mastery_state,
+    update_mastery,
+)
+from practice_engine.models import Course, MasteryState, StepAnswer, load_course
 
 # The course file, found from this test file's own location (see test_models.py).
 COURSE = (
@@ -14,22 +23,32 @@ COURSE = (
 )
 
 # In the course, problem push_cart has three steps:
-# step 1 is a choice step with 3 options, skill work_energy_theorem;
+# step 1 is a choice step with 4 options, skill choose_principle;
 # step 2 is a number step, skill work_constant_force.
-CHOICE_SKILL = "work_energy_theorem"
+CHOICE_SKILL = "choose_principle"
 NUMBER_SKILL = "work_constant_force"
 
+START_TIME = datetime(2026, 11, 20, 10, 0)
 
-def answer(position: int, correct: bool, seconds: float = 20) -> StepAnswer:
-    """A step answer by student "sam" on problem push_cart."""
+
+def answer(
+    position: int,
+    correct: bool,
+    seconds: float = 20,
+    hints_used: int = 0,
+    attempt: int = 1,
+    minute: int = 0,
+) -> StepAnswer:
+    """A step answer by student "sam" on problem push_cart, `minute` minutes after 10:00."""
     return StepAnswer(
         nickname="sam",
         problem_id="push_cart",
         step_position=position,
         correct=correct,
         seconds=seconds,
-        hints_used=0,
-        answered_at=datetime(2026, 11, 20, 10, 0),
+        hints_used=hints_used,
+        answered_at=START_TIME + timedelta(minutes=minute),
+        attempt=attempt,
     )
 
 
@@ -39,6 +58,7 @@ def test_new_student_has_every_skill_at_the_starting_value() -> None:
     state = new_mastery_state(course, "sam")
 
     assert state.nickname == "sam"
+    assert state.course_id == course.id
     assert set(state.mastery) == {skill.id for skill in course.skills}
     assert all(value == START_MASTERY for value in state.mastery.values())
 
@@ -85,33 +105,64 @@ def test_mastery_stays_between_0_and_1_after_many_answers(correct: bool) -> None
 def test_wrong_step_never_raises_mastery_after_earlier_misses() -> None:
     course = load_course(COURSE)
     state = new_mastery_state(course, "sam")
-    # Many wrong number steps push work_energy_theorem to its lowest number-step value
-    # (problem drag_crate step 5 is a number step on that skill).
-    number_miss = answer(5, correct=False).model_copy(update={"problem_id": "drag_crate"})
+    # Many wrong number steps push work_constant_force to its lowest number-step value
+    # (problem push_cart step 2 is a number step on that skill).
     for _ in range(50):
-        state = update_mastery(state, number_miss, course)
-    low = state.mastery[CHOICE_SKILL]
+        state = update_mastery(state, answer(2, correct=False), course)
+    low = state.mastery[NUMBER_SKILL]
 
-    # A wrong choice step on the same skill, slow or fast, must not lift it.
-    for seconds in (20, 2):
-        after = update_mastery(state, answer(1, correct=False, seconds=seconds), course)
-        assert after.mastery[CHOICE_SKILL] <= low
+    # A wrong choice step on the same skill (problem drag_crate step 3, 3 options), slow,
+    # fast or hinted, must not lift it.
+    for wrong in (
+        answer(3, correct=False, seconds=20),
+        answer(3, correct=False, seconds=2),
+        answer(3, correct=True, hints_used=1),
+    ):
+        wrong = wrong.model_copy(update={"problem_id": "drag_crate"})
+        after = update_mastery(state, wrong, course)
+        assert after.mastery[NUMBER_SKILL] <= low
+
+
+@pytest.mark.parametrize(
+    ("kind", "problem_id", "position", "skill"),
+    [
+        ("number", "push_cart", 2, NUMBER_SKILL),
+        ("choice with 4 options", "push_cart", 1, CHOICE_SKILL),
+        ("choice with 3 options", "drag_crate", 3, NUMBER_SKILL),
+        ("order of 3 items", "spring_launch", 2, "energy_conservation"),
+    ],
+)
+def test_reaching_mastered_takes_4_to_6_right_first_tries(
+    kind: str, problem_id: str, position: int, skill: str
+) -> None:
+    # Count how many right first tries in a row take a new student to MASTERED.
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    right = answer(position, correct=True).model_copy(update={"problem_id": problem_id})
+
+    steps = 0
+    while state.mastery[skill] < MASTERED:
+        state = update_mastery(state, right, course)
+        steps += 1
+        assert steps <= 6, f"a {kind} step has not reached {MASTERED} after 6 right steps"
+
+    assert steps >= 4, f"a {kind} step reached {MASTERED} after only {steps} right steps"
 
 
 def test_order_step_uses_its_own_guess_chance() -> None:
     course = load_course(COURSE)
     state = new_mastery_state(course, "sam")
-    # Problem spring_launch step 1 orders 3 items (skill energy_conservation), so the
-    # guess chance is 1 in 6. Right answer, from 0.2:
-    #   knows and did not slip:      0.2 x 0.9   = 0.18
-    #   does not know and guessed:   0.8 x 1/6   = 0.133333
-    #   after the answer:            0.18 / (0.18 + 0.133333) = 0.574468
-    #   after learning:              0.574468 + (1 - 0.574468) x 0.15 = 0.638298
-    order_answer = answer(1, correct=True).model_copy(update={"problem_id": "spring_launch"})
+    # Problem spring_launch step 2 orders 3 items (skill energy_conservation): 1 in 6,
+    # raised to the lowest guess chance allowed, 0.2. Right answer, from 0.1:
+    #   knows and did not slip:      0.1 x 0.85 = 0.085
+    #   does not know and guessed:   0.9 x 0.2  = 0.18
+    #   after the answer:            0.085 / (0.085 + 0.18) = 0.320755
+    #   after learning:              0.320755 + (1 - 0.320755) x 0.05 = 0.354717
+    order_answer = answer(2, correct=True).model_copy(update={"problem_id": "spring_launch"})
 
     after = update_mastery(state, order_answer, course)
 
-    assert after.mastery["energy_conservation"] == pytest.approx(0.638298, abs=1e-6)
+    assert after.mastery["energy_conservation"] == pytest.approx(0.354717, abs=1e-6)
 
 
 def test_wrong_step_taking_exactly_3_seconds_gets_the_full_change() -> None:
@@ -149,26 +200,118 @@ def test_matches_hand_computed_examples() -> None:
     course = load_course(COURSE)
     state = new_mastery_state(course, "sam")
 
-    # Right answer on the number step (guess chance 0.05), from 0.2:
-    #   knows and did not slip:      0.2 x 0.9  = 0.18
-    #   does not know and guessed:   0.8 x 0.05 = 0.04
-    #   after the answer:            0.18 / (0.18 + 0.04) = 0.818182
-    #   after learning:              0.818182 + (1 - 0.818182) x 0.15 = 0.845455
+    # Right answer on the number step (guess chance 0.2, slip 0.15), from 0.1:
+    #   knows and did not slip:      0.1 x 0.85 = 0.085
+    #   does not know and guessed:   0.9 x 0.2  = 0.18
+    #   after the answer:            0.085 / (0.085 + 0.18) = 0.320755
+    #   after learning:              0.320755 + (1 - 0.320755) x 0.05 = 0.354717
     right = update_mastery(state, answer(2, correct=True), course)
-    assert right.mastery[NUMBER_SKILL] == pytest.approx(0.845455, abs=1e-6)
+    assert right.mastery[NUMBER_SKILL] == pytest.approx(0.354717, abs=1e-6)
 
-    # Wrong answer on the choice step (3 options: 1 in 3, capped at 0.3), from 0.2:
-    #   knows but slipped:             0.2 x 0.1 = 0.02
-    #   does not know, did not guess:  0.8 x 0.7 = 0.56
-    #   after the answer:              0.02 / (0.02 + 0.56) = 0.034483
-    #   after learning:                0.034483 + (1 - 0.034483) x 0.15 = 0.179310
+    # Wrong answer on the choice step (4 options: 1 in 4, so 0.25), from 0.1:
+    #   knows but slipped:             0.1 x 0.15 = 0.015
+    #   does not know, did not guess:  0.9 x 0.75 = 0.675
+    #   after the answer:              0.015 / (0.015 + 0.675) = 0.021739
+    #   after learning:                0.021739 + (1 - 0.021739) x 0.05 = 0.070652
     wrong = update_mastery(state, answer(1, correct=False), course)
-    assert wrong.mastery[CHOICE_SKILL] == pytest.approx(0.179310, abs=1e-6)
+    assert wrong.mastery[CHOICE_SKILL] == pytest.approx(0.070652, abs=1e-6)
 
     # The same wrong answer in 2 seconds keeps half the change:
-    #   0.2 + (0.179310 - 0.2) x 0.5 = 0.189655
+    #   0.1 + (0.070652 - 0.1) x 0.5 = 0.085326
     fast = update_mastery(state, answer(1, correct=False, seconds=2), course)
-    assert fast.mastery[CHOICE_SKILL] == pytest.approx(0.189655, abs=1e-6)
+    assert fast.mastery[CHOICE_SKILL] == pytest.approx(0.085326, abs=1e-6)
+
+
+def test_second_try_leaves_mastery_unchanged() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+
+    for correct in (True, False):
+        after = update_mastery(state, answer(1, correct=correct, attempt=2), course)
+        assert after == state
+        assert after is not state  # a copy, so changing it cannot change the original
+
+
+def test_right_after_a_hint_counts_as_wrong() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+
+    hinted = update_mastery(state, answer(1, correct=True, hints_used=1), course)
+    wrong = update_mastery(state, answer(1, correct=False), course)
+
+    assert hinted.mastery[CHOICE_SKILL] == wrong.mastery[CHOICE_SKILL]
+
+
+def test_fast_answer_after_a_hint_is_not_treated_as_a_guess() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+
+    # A wrong answer after a hint gets the full change, even if it was quick.
+    fast_hinted = update_mastery(state, answer(1, correct=False, seconds=2, hints_used=1), course)
+    slow_wrong = update_mastery(state, answer(1, correct=False, seconds=20), course)
+
+    assert fast_hinted.mastery[CHOICE_SKILL] == slow_wrong.mastery[CHOICE_SKILL]
+
+
+def test_state_for_another_course_is_refused() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam").model_copy(update={"course_id": "other-course"})
+
+    with pytest.raises(ValueError, match="other-course"):
+        update_mastery(state, answer(1, correct=True), course)
+
+
+def test_mastered_needs_the_number_and_a_streak() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    history = []
+    # Right first tries on the choice step, one a minute, until the number is high.
+    for minute in range(6):
+        right = answer(1, correct=True, minute=minute)
+        state = update_mastery(state, right, course)
+        history.append(right)
+    assert state.mastery[CHOICE_SKILL] >= MASTERED
+
+    assert is_mastered(state, history, CHOICE_SKILL, course) is True
+    # The number alone is not enough: with too few answers there is no streak.
+    assert is_mastered(state, history[: MASTERY_STREAK - 1], CHOICE_SKILL, course) is False
+    # A right answer after a hint breaks the streak, even with the same high number.
+    hinted = answer(1, correct=True, hints_used=1, minute=10)
+    assert is_mastered(state, [*history, hinted], CHOICE_SKILL, course) is False
+    # A second try is not a first try, so it neither breaks nor builds the streak.
+    retry = answer(1, correct=False, attempt=2, minute=11)
+    assert is_mastered(state, [*history, retry], CHOICE_SKILL, course) is True
+
+
+def test_not_mastered_below_the_line_even_with_a_streak() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    history = [answer(1, correct=True, minute=minute) for minute in range(MASTERY_STREAK)]
+
+    assert is_mastered(state, history, CHOICE_SKILL, course) is False
+
+
+def test_streak_uses_the_newest_answers_by_time() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    state.mastery[CHOICE_SKILL] = 0.99
+    rights = [answer(1, correct=True, minute=minute) for minute in range(MASTERY_STREAK)]
+    # The newest answer is a miss, even though it comes first in the list.
+    miss = answer(1, correct=False, minute=30)
+
+    assert is_mastered(state, [miss, *rights], CHOICE_SKILL, course) is False
+
+
+def test_chance_correct_matches_hand_computed_examples() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    push_cart = course.problems[0]
+    assert push_cart.id == "push_cart"
+
+    # Choice step (4 options), from 0.1: 0.1 x 0.85 + 0.9 x 0.25 = 0.31
+    assert chance_correct(state, push_cart.steps[0], course) == pytest.approx(0.31)
+    # Number step, from 0.1: 0.1 x 0.85 + 0.9 x 0.2 = 0.265
+    assert chance_correct(state, push_cart.steps[1]) == pytest.approx(0.265)
 
 
 def test_the_state_passed_in_is_not_changed() -> None:
@@ -205,3 +348,65 @@ def test_answer_from_another_student_is_refused() -> None:
 
     with pytest.raises(ValueError, match="sam"):
         update_mastery(state, answer(1, correct=True), course)
+
+
+@pytest.mark.parametrize(("field", "value"), [("attempt", 0), ("attempt", -5), ("hints_used", -1)])
+def test_impossible_attempt_or_hint_count_is_refused(field: str, value: int) -> None:
+    fields = answer(1, correct=True).model_dump()
+    fields[field] = value
+
+    with pytest.raises(ValidationError):
+        StepAnswer(**fields)
+
+
+def mastered_choice_skill() -> tuple[Course, MasteryState, list[StepAnswer]]:
+    """A course, a state at 0.99 on CHOICE_SKILL, and a streak of right first tries."""
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    state.mastery[CHOICE_SKILL] = 0.99
+    rights = [answer(1, correct=True, minute=minute) for minute in range(MASTERY_STREAK)]
+    return course, state, rights
+
+
+def test_streak_ignores_other_students_answers() -> None:
+    course, state, rights = mastered_choice_skill()
+    alex_miss = answer(1, correct=False, minute=30).model_copy(update={"nickname": "alex"})
+
+    assert is_mastered(state, [*rights, alex_miss], CHOICE_SKILL, course) is True
+
+
+def test_streak_ignores_answers_to_steps_no_longer_in_the_course() -> None:
+    course, state, rights = mastered_choice_skill()
+    removed = answer(1, correct=False, minute=30).model_copy(update={"problem_id": "gone"})
+
+    assert is_mastered(state, [*rights, removed], CHOICE_SKILL, course) is True
+
+
+def test_streak_with_mixed_time_zones_is_refused() -> None:
+    course, state, rights = mastered_choice_skill()
+    with_zone = answer(1, correct=True).model_copy(
+        update={"answered_at": datetime(2026, 11, 21, tzinfo=UTC)}
+    )
+
+    with pytest.raises(ValueError, match="time zone"):
+        is_mastered(state, [*rights, with_zone], CHOICE_SKILL, course)
+
+
+def test_is_mastered_and_chance_correct_refuse_another_course() -> None:
+    course, state, rights = mastered_choice_skill()
+    other = state.model_copy(update={"course_id": "other-course"})
+
+    with pytest.raises(ValueError, match="other-course"):
+        is_mastered(other, rights, CHOICE_SKILL, course)
+    with pytest.raises(ValueError, match="other-course"):
+        chance_correct(other, course.problems[0].steps[0], course)
+
+
+def test_chance_correct_treats_a_missing_skill_as_new() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+    del state.mastery[CHOICE_SKILL]
+
+    # Same as the starting value: 0.1 x 0.85 + 0.9 x 0.25 = 0.31
+    assert START_MASTERY == 0.1
+    assert chance_correct(state, course.problems[0].steps[0]) == pytest.approx(0.31)

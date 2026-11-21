@@ -131,13 +131,43 @@ OTHER_BREAKAGES = [
     ),
     (
         "one item to order",
-        lambda c: setattr(c.problems[3].steps[0], "answer", ["only one"]),
+        lambda c: setattr(c.problems[3].steps[1], "answer", ["only one"]),
         "at least 2 items",
     ),
     (
         "repeated item to order",
-        lambda c: setattr(c.problems[3].steps[0], "answer", ["Same", "same"]),
+        lambda c: setattr(c.problems[3].steps[1], "answer", ["Same", "same"]),
         "more than once",
+    ),
+    ("empty problem title", lambda c: setattr(c.problems[0], "title", " "), "empty title"),
+    (
+        "repeated problem title",
+        lambda c: setattr(c.problems[1], "title", c.problems[0].title),
+        "share the title",
+    ),
+    (
+        "feedback on a number step",
+        lambda c: setattr(c.problems[0].steps[1], "feedback", {"30": "Check the units."}),
+        "only 'choice' steps may have feedback",
+    ),
+    (
+        "feedback for an option that is not offered",
+        lambda c: c.problems[0].steps[0].feedback.update({"Not offered": "Why not."}),
+        "'Not offered', which is not one of the options",
+    ),
+    (
+        "feedback for the correct answer",
+        lambda c: (
+            c.problems[0]
+            .steps[0]
+            .feedback.update({c.problems[0].steps[0].answer: "This one is right."})
+        ),
+        "feedback is given for the correct answer",
+    ),
+    (
+        "missing feedback for a wrong option",
+        lambda c: c.problems[0].steps[0].feedback.pop("Conservation of momentum"),
+        "wrong option 'Conservation of momentum' needs a feedback message",
     ),
 ]
 
@@ -175,6 +205,15 @@ def test_missing_field_is_reported_counting_from_one(tmp_path: Path) -> None:
         load_course(path)
 
     assert "problem 2, step 3, 'hint': is missing" in str(error.value)
+
+
+def test_missing_problem_title_is_reported(tmp_path: Path) -> None:
+    path = _write_variant(tmp_path, lambda d: d["problems"][0].pop("title"))
+
+    with pytest.raises(ValueError) as error:
+        load_course(path)
+
+    assert "problem 1, 'title': is missing" in str(error.value)
 
 
 def test_misspelled_field_name_is_reported(tmp_path: Path) -> None:

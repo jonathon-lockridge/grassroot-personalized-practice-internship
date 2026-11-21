@@ -1,8 +1,9 @@
 """What a course looks like, and the checks that keep a course file honest.
 
 A course is data, not code: a list of skills and a list of problems, each problem
-made of steps, each step tagged with one skill. This file describes those shapes
-and offers two helpers:
+with a short title and made of steps, each step tagged with one skill. A choice
+step also says, for each wrong option, why it is wrong. This file describes those
+shapes and offers two helpers:
 
 - load_course(path): read a course.json file into the shapes below. A file that is
   not valid JSON, or has a missing, misspelled or wrongly typed field, stops here
@@ -12,10 +13,11 @@ and offers two helpers:
   list means the course is sound.
 
 How to read this file: `name: str` means the field holds text, `int` a whole
-number, `float` a number with a decimal point, `list[str]` a list of texts, and
-`|` means "or". `-> list[str]` after a function means it gives back a list of
-texts. A name that starts with `_` is a helper used only inside this file. An
-f"..." text has blanks: whatever is inside {braces} is filled in.
+number, `float` a number with a decimal point, `list[str]` a list of texts,
+`dict[str, str]` a look-up table from one text to another, and `|` means "or".
+`-> list[str]` after a function means it gives back a list of texts. A name that
+starts with `_` is a helper used only inside this file. An f"..." text has
+blanks: whatever is inside {braces} is filled in.
 
 Nothing here knows about algebra or physics, and nothing here touches the web
 server or stored data.
@@ -27,7 +29,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 STEP_KINDS = ("choice", "number", "order")
 DIFFICULTIES = (1, 2, 3)  # 1 easy, 2 medium, 3 hard
@@ -38,7 +40,7 @@ COURSE_ID_PATTERN = re.compile(r"[a-z0-9]+([-_][a-z0-9]+)*")
 
 
 class CourseShape(BaseModel):
-    """Shared setting for the four shapes below.
+    """Shared setting for the course shapes below.
 
     `extra="forbid"` refuses a field name we do not know, so a typo in the file,
     such as "prerequisite" instead of "prerequisites", is reported instead of
@@ -68,6 +70,10 @@ class Step(CourseShape):
       (useful when answers are rounded). Left out, the typed number must match.
     - "order": put items in order; `answer` is the list in the correct order, and
       the student sees it shuffled.
+
+    `feedback` (choice steps only) is a look-up table: wrong option -> a one-line
+    message saying why that option is wrong, shown right after the student picks
+    it. Every wrong option needs one; the correct answer gets none.
     """
 
     prompt: str  # the question text
@@ -83,12 +89,17 @@ class Step(CourseShape):
     skill: str
     # Only number steps may have a tolerance; see the kinds above.
     tolerance: float | None = None
+    # Only choice steps have feedback; for the other kinds this stays None (nothing).
+    # Saying why an answer is wrong teaches more than "right/wrong" alone
+    # (research report, change 4).
+    feedback: dict[str, str] | None = None
 
 
 class Problem(CourseShape):
     """A scenario, such as an equation, and the ordered steps that solve it."""
 
     id: str
+    title: str  # a short name the student sees, like "Bullet into a hanging block"
     prompt: str
     difficulty: int
     steps: list[Step]
@@ -218,7 +229,8 @@ def _check_ids(course: Course) -> list[str]:
 
 
 def _check_names(course: Course) -> list[str]:
-    """The course title and every skill name are shown to students, so they must exist."""
+    """The course title, every skill name and every problem title are shown to
+    students, so they must exist, and no two skills or two problems may share one."""
     complaints = []
     # .strip() removes spaces at both ends, so a name made only of spaces counts as empty.
     if not course.title.strip():
@@ -230,6 +242,13 @@ def _check_names(course: Course) -> list[str]:
         if skill.name in seen:
             complaints.append(f"Two skills share the name '{skill.name}'.")
         seen.add(skill.name)
+    seen = set()  # start again: problem titles are a separate list from skill names
+    for problem in course.problems:
+        if not problem.title.strip():
+            complaints.append(f"Problem '{problem.id}' has an empty title.")
+        if problem.title in seen:
+            complaints.append(f"Two problems share the title '{problem.title}'.")
+        seen.add(problem.title)
     return complaints
 
 
@@ -342,6 +361,8 @@ def _check_step(step: Step, where: str) -> list[str]:
         )
     if step.kind != "number" and step.tolerance is not None:
         complaints.append(f"{where}: only 'number' steps may have a tolerance.")
+    if step.kind != "choice" and step.feedback is not None:
+        complaints.append(f"{where}: only 'choice' steps may have feedback.")
     if step.kind == "choice":
         complaints += _check_choice(step, where)
     elif step.kind == "number":
@@ -379,6 +400,32 @@ def _check_choice(step: Step, where: str) -> list[str]:
             f"{where}: the answer '{step.answer}' is not one of the options "
             "(it must match one option exactly, including capital letters and spaces)."
         )
+    complaints += _check_feedback(step, options, where)
+    return complaints
+
+
+def _check_feedback(step: Step, options: list[str], where: str) -> list[str]:
+    """Every wrong option needs a message saying why it is wrong; the answer needs none."""
+    complaints = []
+    # No feedback line at all counts as an empty table, so every wrong option is reported.
+    feedback = step.feedback or {}
+    for option in feedback:  # going through a look-up table gives its keys: the option texts
+        if option not in options:
+            complaints.append(
+                f"{where}: feedback is given for '{option}', which is not one of the options "
+                "(it must match one option exactly, including capital letters and spaces)."
+            )
+        elif option == step.answer:
+            complaints.append(
+                f"{where}: feedback is given for the correct answer '{option}'; "
+                "feedback is only for wrong options."
+            )
+    for option in options:
+        if option != step.answer and not feedback.get(option, "").strip():
+            complaints.append(
+                f"{where}: the wrong option '{option}' needs a feedback message "
+                "saying why it is wrong."
+            )
     return complaints
 
 
@@ -429,6 +476,7 @@ class MasteryState(CourseShape):
     """
 
     nickname: str
+    course_id: str  # which course these skills belong to, so a state is never used on another
     mastery: dict[str, float]
 
 
@@ -440,5 +488,8 @@ class StepAnswer(CourseShape):
     step_position: int  # which step of the problem, counting from 1 like the rest of this file
     correct: bool  # True if right, False if wrong
     seconds: float  # how long the student took on this step
-    hints_used: int
+    hints_used: int = Field(ge=0)  # how many hints they opened; never below 0
     answered_at: datetime  # the date and time of the answer
+    # Which try at this step this was: 1 is the first try, 2 the second, and so on
+    # (never below 1). Only the first try changes mastery (see mastery.py).
+    attempt: int = Field(default=1, ge=1)
