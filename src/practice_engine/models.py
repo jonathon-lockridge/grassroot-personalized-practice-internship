@@ -24,6 +24,7 @@ server or stored data.
 import json
 import math
 import re
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -413,3 +414,31 @@ def _check_order(step: Step, where: str) -> list[str]:
     if any(not item.strip() for item in answer):
         complaints.append(f"{where}: an item in the order is empty.")
     return complaints
+
+
+# What the engine knows about one student (step T2). These are not part of a course
+# file; they describe a student's answers and how well the engine thinks they know
+# each skill. Like the course shapes, they hold only nicknames, never personal data.
+
+
+class MasteryState(CourseShape):
+    """How well the engine thinks one student knows each skill of a course.
+
+    `mastery` is a look-up table: skill id -> a number from 0 to 1, where 0 means
+    "surely does not know it" and 1 means "surely knows it".
+    """
+
+    nickname: str
+    mastery: dict[str, float]
+
+
+class StepAnswer(CourseShape):
+    """One step a student answered, as the page reports it."""
+
+    nickname: str
+    problem_id: str
+    step_position: int  # which step of the problem, counting from 1 like the rest of this file
+    correct: bool  # True if right, False if wrong
+    seconds: float  # how long the student took on this step
+    hints_used: int
+    answered_at: datetime  # the date and time of the answer
