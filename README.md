@@ -8,7 +8,7 @@ This is an independent project, reviewed with Grassroot's cofounder as mentor. I
 
 ## Where things stand
 
-The plan is [PRD.md](PRD.md). The work is small steps in [TODO.md](TODO.md); the current step is T1b, reviewing the physics course. So far: the shapes of a course and a checker that finds faults in a course file (`src/practice_engine/models.py`), an AP Physics C: Mechanics energy and momentum course with 19 step-by-step problems and 16 skills (`data/ap-physics-c-energy-momentum/course.json`), 31 tests, and a placeholder web server. The plan is to show it inside a mock of Grassroot where only practice works. Written in Python 3.12. Data will live in one local file (SQLite; step T5). A small web server (made with a tool called FastAPI) is already set up for when a web page, or a connection to Grassroot, needs it.
+The plan is [PRD.md](PRD.md). The work is small steps in [TODO.md](TODO.md); the current step is T1b, reviewing the physics course. So far: the shapes of a course and a checker that finds faults in a course file (`src/practice_engine/models.py`), an AP Physics C: Mechanics energy and momentum course with 24 step-by-step problems and 17 skills (`data/ap-physics-c-energy-momentum/course.json`), 187 tests, and a placeholder web server. The plan is to show it inside a mock of Grassroot where only practice works. Written in Python 3.12. Data will live in one local file (SQLite; step T5). A small web server (made with a tool called FastAPI) is already set up for when a web page, or a connection to Grassroot, needs it.
 
 ## Running it
 

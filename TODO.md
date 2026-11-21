@@ -4,7 +4,7 @@
 
 ## Now (one step only)
 
-- [ ] **T1b Review the physics course.** Subject changed on 2026-11-19 (mentor meeting): AP Physics C: Mechanics, energy and momentum, in `data/ap-physics-c-energy-momentum/course.json`. It has 16 skills and 19 problems (6 easy, 7 medium, 6 hard). Every number answer was recomputed by computer and checked by a second reviewer (its five small fixes are in). Number steps can now have a `tolerance` (how far off a typed answer may be and still count). Jonathon's part: work every problem on paper as test practice, using the step checklist below, and note any step that is wrong, unclear, too easy or missing a case from class. **Done when:** every note is fixed and the tests pass.
+- [ ] **T1b Review the physics course.** Subject changed on 2026-11-19 (mentor meeting): AP Physics C: Mechanics, energy and momentum, in `data/ap-physics-c-energy-momentum/course.json`. It has 17 skills and 24 problems (7 easy, 9 medium, 8 hard), each starting with a "which principle applies?" step, and every wrong option says why it is wrong. Every number answer was recomputed by computer and checked by a second reviewer (its five small fixes are in). Number steps can now have a `tolerance` (how far off a typed answer may be and still count). Jonathon's part: work every problem on paper as test practice, using the step checklist below, and note any step that is wrong, unclear, too easy or missing a case from class. **Done when:** every note is fixed and the tests pass.
   - Step checklist (agreed 2026-11-16):
     1. Solve the problem yourself on paper.
     2. For each step, ask whether a student could do something else and still be right. If so, reword the question or change the problem.
