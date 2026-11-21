@@ -1,11 +1,20 @@
 """Say whether a student's answer to one step is right or wrong.
 
-One helper:
+Two helpers:
 
-- check_answer(step, given): `given` is what the student typed or picked. Gives back
-  True if it is right by the rules of the step's kind, and False if not. An answer of
-  the wrong sort, such as nothing at all or a word where a number belongs, is simply
-  wrong; it never stops the program.
+- can_read(step, given): `given` is what the student typed or picked. Gives back
+  False when it cannot be read at all, such as "five" or "5.48 m/s" typed into a
+  number step, so the page can ask the student to type it again instead of marking
+  it wrong. The page should call this first, before check_answer.
+- check_answer(step, given): gives back True if `given` is right by the rules of the
+  step's kind, and False if not. An answer of the wrong sort, such as nothing at all
+  or a word where a number belongs, is simply wrong; it never stops the program.
+
+A number may be typed with the minus sign "−" that some keyboards and pasted text
+use, and with commas between groups of three digits, like 1,400 or -12,000.5. Any
+other comma, like 5,48 or 01,400, cannot be read, because it might mean 5.48 or 548.
+An underscore, like 1_4, cannot be read either, so a slip is not taken as 14.
+Python's own other number forms, such as 1e3 for 1000, are also read.
 
 The step is expected to come from a course that passed validate_course in models.py,
 so its own answer already has the right sort of value for its kind.
@@ -15,13 +24,38 @@ server or stored data.
 """
 
 import math
+import re
 
 from practice_engine.models import Step
+
+# The minus sign "−" (a different character from the hyphen "-" on most keyboards)
+# that phones, word processors and pasted text often use. It is read as a minus.
+_TYPOGRAPHIC_MINUS = "\u2212"
+# A number with commas between groups of three digits, like 1,400 or -12,000.5:
+# an optional sign, one to three digits not starting with 0, then one or more ",ddd"
+# groups, then an optional decimal part. Any other use of a comma does not match.
+_THOUSANDS_PATTERN = re.compile(r"[+-]?[1-9]\d{0,2}(,\d{3})+(\.\d*)?")
 
 # Numbers on a computer are stored in binary, so 5.48 - 5.43 comes out as
 # 0.05000000000000071 instead of exactly 0.05. This tiny extra allowance makes an
 # answer that sits exactly on the edge of the tolerance count as right.
 _ROUNDING_SLACK = 1e-9
+
+
+def can_read(step: Step, given: object) -> bool:
+    """False if `given` cannot be read as an answer to `step` at all, True otherwise.
+
+    A wrong answer that can be read, such as 240 instead of -240, gives True here;
+    check_answer then says it is wrong. A typing slip should not cost the student
+    their first try (PRD decision 9; research report, change 1).
+    """
+    if step.kind == "choice":
+        return isinstance(given, str)
+    if step.kind == "number":
+        return _read_number(given) is not None
+    if step.kind == "order":
+        return isinstance(given, list) and all(isinstance(item, str) for item in given)
+    return False  # a kind we do not know; validate_course reports it
 
 
 def check_answer(step: Step, given: object) -> bool:
@@ -75,8 +109,15 @@ def _read_number(given: object) -> float | None:
         except OverflowError:
             return None  # a whole number far too big to be an answer, such as 10**400
     elif isinstance(given, str):
+        text = given.strip().replace(_TYPOGRAPHIC_MINUS, "-")
+        if "_" in text:
+            return None  # Python would read 1_4 as 14, hiding a typing slip
+        if "," in text:
+            if not _THOUSANDS_PATTERN.fullmatch(text):
+                return None  # a comma that is not between groups of three, like 5,48
+            text = text.replace(",", "")
         try:
-            number = float(given)  # float() itself ignores spaces at the ends
+            number = float(text)
         except ValueError:
             return None  # the text is not a number, such as "five" or ""
     else:
