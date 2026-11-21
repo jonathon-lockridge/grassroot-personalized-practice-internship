@@ -7,8 +7,9 @@ One main helper:
   sentence telling the student why it was picked.
 
 Only a step's first try counts as evidence here, as in mastery.py: a second try says
-little about what the student knew, and a first try made after reading a hint
-counts as missed (research report, change 1).
+little about what the student knew (research report, change 1). A wrong first try
+after a hint is a miss. A right first try after a hint is only half a right answer
+(mastery.py), so these rules skip it: it is neither a miss nor a right answer here.
 
 The rules, most important first:
 
@@ -17,7 +18,9 @@ The rules, most important first:
    easiest first.
 2. Follow-up: if the student missed a step and has not got that skill right since,
    practice that skill again. If the skill builds on a skill that is not ready yet,
-   practice that earlier skill instead, and say so.
+   practice that earlier skill instead, and say so. If the missed step's skill is
+   in every problem (see "Throughout"), practice the skill rule 3 or 5 would pick
+   first instead, and say so.
    Stuck: if a skill has had many first tries and its number is still low, more of
    the same is not helping. Practice its weakest prerequisite that is not mastered
    instead, or, if there is none, the easiest problem for the skill (research
@@ -30,12 +33,19 @@ The rules, most important first:
 
 Throughout:
 
+- A skill used by every problem of the course (such as a "which idea fits?" first
+  step) gets practiced whatever is picked, so no problem is ever picked because of
+  it: no rule targets it. Its mastery is still tracked as usual. This only applies
+  when the course has more than one problem and at least one other skill.
 - A skill is "ready" only when every skill it builds on is known well enough. A
   skill that is not ready is not picked by rules 3 and 5. A course with no
   prerequisites at all switches this off.
 - For each skill, prefer a problem the student should get about 70 to 85 percent of
   steps right on, closest to the middle, then the lower difficulty (research report,
-  change 7).
+  change 7). When no problem is inside that range (mostly for a new student), the
+  lower difficulty comes first, then the closest to the range (decided 2026-11-20):
+  the predicted share can make a hard problem full of guessable choice steps look
+  easier than an easy one.
 - Each pick in a batch practices a different skill, up to three skills; two picks in
   a row never practice the same skill when the course allows. When problems are
   otherwise equal, prefer one whose first step has a different answer from the
@@ -232,7 +242,8 @@ def _starting_check(course: Course, count: int) -> list[Pick]:
     no problem adds a skill.
     """
     starting_skills = {skill.id for skill in course.skills if not skill.prerequisites}
-    covered: set[str] = set()
+    # A skill in every problem gets checked anyway, so it counts as covered from the start.
+    covered: set[str] = _skills_in_every_problem(course)
     picks: list[Pick] = []
     while len(picks) < count:
         best: Problem | None = None
@@ -296,6 +307,8 @@ class _Selector:
             skill.id: is_mastered(state, history, skill.id, course) for skill in course.skills
         }
         self.prerequisites_of = {skill.id: skill.prerequisites for skill in course.skills}
+        # Skills practiced by every problem: tracked, but never a reason to pick a problem.
+        self.everywhere = _skills_in_every_problem(course)
         # The ready rule switches off when no skill lists any prerequisite.
         self.uses_prerequisites = any(skill.prerequisites for skill in course.skills)
         # Only first tries are evidence, oldest first.
@@ -325,19 +338,35 @@ class _Selector:
         answered_right: set[str] = set()  # skills answered right after the miss
         for answer in reversed(self.first_tries):  # newest first
             skill = self.skill_of(answer)
+            if _right_after_hint(answer):
+                continue  # half credit: neither a miss nor a right answer here
             if _right(answer):
                 answered_right.add(skill)
             elif skill not in answered_right:
-                return [self._follow_up_target(answer, skill)]
+                target = self._follow_up_target(answer, skill)
+                return [target] if target is not None else []
         return []
 
-    def _follow_up_target(self, answer: StepAnswer, missed_skill: str) -> _Target:
+    def _follow_up_target(self, answer: StepAnswer, missed_skill: str) -> _Target | None:
         missed = MissedStep(problem_id=answer.problem_id, step_position=answer.step_position)
         title = self.problem_by_id[answer.problem_id].title
         where = (
             f"you missed step {answer.step_position} of {title} "
             f"({_skill_name(self.course, missed_skill)})"
         )
+        if missed_skill in self.everywhere:
+            # Every problem practices this skill anyway, so work on another one: the
+            # first that rule 3 (weakest first) or rule 5 would pick.
+            others = self.partway() + self.new()
+            if not others:
+                return None
+            other = others[0]
+            return _Target(
+                skill=other.skill,
+                reason=f"Picked for you: {where}, which every problem practices. {other.reason}",
+                missed_step=missed,
+                easiest=other.easiest,
+            )
         stuck = self._stuck_target(missed_skill)
         if stuck is not None:
             return _Target(
@@ -347,12 +376,19 @@ class _Selector:
                 easiest=stuck.easiest,
             )
         # If the missed skill is not ready, step down to its weakest unready prerequisite,
-        # and again if that one is not ready either. `seen` stops a broken course with a
-        # loop of prerequisites from going round forever.
+        # and again if that one is not ready either. A skill in every problem is never
+        # stepped down to. `seen` stops a broken course with a loop of prerequisites
+        # from going round forever.
         target = missed_skill
         seen = {target}
         while not self.is_ready(target):
-            unready = [p for p in self.prerequisites_of[target] if self.mastery[p] < READY_MASTERY]
+            unready = [
+                p
+                for p in self.prerequisites_of[target]
+                if self.mastery[p] < READY_MASTERY and p not in self.everywhere
+            ]
+            if not unready:
+                break
             weakest = min(unready, key=lambda p: self.mastery[p])  # first in the list wins ties
             if weakest in seen:
                 break
@@ -373,7 +409,11 @@ class _Selector:
         if not stuck:
             return None
         name = _skill_name(self.course, skill_id)
-        not_mastered = [p for p in self.prerequisites_of[skill_id] if not self.mastered[p]]
+        not_mastered = [
+            p
+            for p in self.prerequisites_of[skill_id]
+            if not self.mastered[p] and p not in self.everywhere
+        ]
         if not_mastered:
             weakest = min(not_mastered, key=lambda p: self.mastery[p])  # first wins ties
             return _Target(
@@ -394,7 +434,10 @@ class _Selector:
         skills = [
             skill.id
             for skill in self.course.skills
-            if self.tries_of[skill.id] and not self.mastered[skill.id] and self.is_ready(skill.id)
+            if self.tries_of[skill.id]
+            and not self.mastered[skill.id]
+            and self.is_ready(skill.id)
+            and skill.id not in self.everywhere
         ]
         # sorted() keeps course order among skills with the same mastery.
         skills = sorted(skills, key=lambda skill_id: self.mastery[skill_id])
@@ -414,7 +457,7 @@ class _Selector:
         """Rule 4: mastered skills whose review gap has passed, most overdue first."""
         due = []  # (how far past due, skill id, when it was mastered)
         for skill in self.course.skills:
-            if not self.mastered[skill.id]:
+            if not self.mastered[skill.id] or skill.id in self.everywhere:
                 continue
             schedule = self._review_schedule(skill.id)
             if schedule is None:
@@ -466,6 +509,8 @@ class _Selector:
         streak = 0
         for answer in self.tries_of[skill_id]:
             replay = update_mastery(replay, answer, self.course)
+            if _right_after_hint(answer):
+                continue  # skipped, as in is_mastered: neither builds nor breaks the streak
             if not _right(answer):
                 streak = 0
                 mastered_at = None
@@ -491,14 +536,16 @@ class _Selector:
                 reason=f"This problem starts you on {_skill_name(self.course, skill.id)}.",
             )
             for skill in self.course.skills
-            if not self.tries_of[skill.id] and self.is_ready(skill.id)
+            if not self.tries_of[skill.id]
+            and self.is_ready(skill.id)
+            and skill.id not in self.everywhere
         ]
 
     def any_skill(self) -> list[_Target]:
         """The last loosening: every skill, ready ones first, then weakest first."""
         # Sort by "not ready" (False comes before True), then by mastery.
         skills = sorted(
-            (skill.id for skill in self.course.skills),
+            (skill.id for skill in self.course.skills if skill.id not in self.everywhere),
             key=lambda skill_id: (not self.is_ready(skill_id), self.mastery[skill_id]),
         )
         targets = []
@@ -545,21 +592,53 @@ class _Selector:
 
         1. not answered in the last 24 hours first;
         2. inside TARGET_SUCCESS first;
-        3. closest to the middle of the target;
-        4. the lower difficulty;
-        5. mixing: a first step whose answer differs from the previous problem's.
+        3. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
+           predicted share is a weak guide there (a hard problem with many guessable
+           choice steps can look easier than an easy one);
+        4. closest to the middle of the target;
+        5. the lower difficulty;
+        6. mixing: a first step whose answer differs from the previous problem's.
         """
         low, high = TARGET_SUCCESS
         success = self.success(problem)
         outside = not low <= success <= high
+        # 0 for every problem inside the target, so this item only sorts the ones outside.
+        difficulty_if_outside = problem.difficulty if outside else 0
         distance = abs(success - (low + high) / 2)
         same_type = problem.steps[0].answer == previous.steps[0].answer
-        return (problem.id in self.recent, outside, distance, problem.difficulty, same_type)
+        return (
+            problem.id in self.recent,
+            outside,
+            difficulty_if_outside,
+            distance,
+            problem.difficulty,
+            same_type,
+        )
 
 
 def _right(answer: StepAnswer) -> bool:
     """A first try counts as right only if it was right without any hint."""
     return answer.correct and answer.hints_used == 0
+
+
+def _right_after_hint(answer: StepAnswer) -> bool:
+    """True for a first try answered right, but after a hint (half credit, mastery.py)."""
+    return answer.correct and answer.hints_used > 0
+
+
+def _skills_in_every_problem(course: Course) -> set[str]:
+    """The skills that every problem of the course has a step on.
+
+    Empty when the course has one problem or none (then "every problem" means
+    nothing special), or when these are all the skills the problems use (leaving
+    them out would leave nothing to pick).
+    """
+    if len(course.problems) < 2:
+        return set()
+    skill_sets = [{step.skill for step in problem.steps} for problem in course.problems]
+    everywhere = set.intersection(*skill_sets)  # the skills found in every set
+    all_used = set.union(*skill_sets)  # the skills found in any set
+    return everywhere if everywhere != all_used else set()
 
 
 def _skill_name(course: Course, skill_id: str) -> str:

@@ -9,9 +9,10 @@ After every step it does two things:
    answer makes it less likely, unless people who know it often slip anyway.
 2. Allow for learning: doing the step may itself have taught them the skill.
 
-Only a step's first try counts, and a first try made after reading a hint counts as
-wrong (research report, change 1): a second try, or a hinted one, says little about
-what the student knew.
+Only a step's first try counts (research report, change 1): a second try says little
+about what the student knew. A right first try made after reading a hint counts as
+half a right answer (decided 2026-11-20): the student did some of the work, but not
+alone. A wrong first try after a hint is an ordinary wrong answer.
 
 Four helpers:
 
@@ -20,7 +21,7 @@ Four helpers:
 - update_mastery(state, answer, course): the state after one step answer. It gives
   back a new state and leaves the one passed in as it was.
 - is_mastered(state, history, skill_id, course): True when a skill counts as
-  mastered: a high number and a short streak of right first tries.
+  mastered: a high number and a short streak of right first tries with no hint.
 - chance_correct(state, step): how likely the student is to get a step right on the
   first try, for the next-problem rules.
 
@@ -68,10 +69,15 @@ FAST_ANSWER_SECONDS = 3
 # The share of the usual change applied for such a fast wrong step: half.
 FAST_WRONG_WEIGHT = 0.5
 
+# A right first try made after reading a hint keeps this share of the change a right
+# answer with no hint would make: half. So it raises mastery, but less.
+HINT_CREDIT = 0.5
+
 # A skill is mastered when its number is at least MASTERED ...
 MASTERED = 0.95
 # ... and the last MASTERY_STREAK first tries on it were right with no hint, a guard
-# in case the numbers above are off (research report, change 2).
+# in case the numbers above are off (research report, change 2). A right first try
+# after a hint is left out of the streak: it neither adds to it nor breaks it.
 MASTERY_STREAK = 3
 
 
@@ -94,7 +100,9 @@ def update_mastery(state: MasteryState, answer: StepAnswer, course: Course) -> M
     The state passed in is not changed; a new one is given back.
 
     Only a first try (attempt 1) changes mastery; any later try gives back an equal
-    copy. A first try made after reading a hint counts as a wrong answer.
+    copy. A right first try made after reading a hint keeps only HINT_CREDIT (half)
+    of the rise a right answer with no hint would give; a wrong one after a hint is
+    an ordinary wrong answer.
     """
     _check_course(state, course)
     if answer.nickname != state.nickname:
@@ -118,7 +126,7 @@ def update_mastery(state: MasteryState, answer: StepAnswer, course: Course) -> M
         return state.model_copy(deep=True)
 
     guess = _guess_chance(step)
-    right = _counts_as_right(answer)
+    right = answer.correct  # a hinted right answer is worked out as right, then halved below
 
     # Part 1: Bayes' rule. Of all the ways this answer could have happened, which
     # share comes from a student who knows the skill?
@@ -139,6 +147,10 @@ def update_mastery(state: MasteryState, answer: StepAnswer, course: Course) -> M
     # change from `before`. A hinted answer is not a fast guess, so it is left out.
     if not answer.correct and answer.hints_used == 0 and answer.seconds < FAST_ANSWER_SECONDS:
         after = before + (after - before) * FAST_WRONG_WEIGHT
+
+    # A right answer after a hint is partial credit: keep only part of the rise.
+    if answer.correct and answer.hints_used > 0:
+        after = before + (after - before) * HINT_CREDIT
 
     if not right:
         # The learning part (Part 2) can lift a low number above where it started,
@@ -161,10 +173,12 @@ def is_mastered(
     """True if the student counts as having mastered `skill_id`.
 
     Both must hold: the skill's number is at least MASTERED, and the student's last
-    MASTERY_STREAK first tries on steps of that skill were right with no hint.
-    `history` is the student's step answers. Answers by other students, and answers
-    to problems or steps no longer in the course (it may have been edited since), are
-    ignored. A skill missing from the state counts as new (START_MASTERY).
+    MASTERY_STREAK first tries on steps of that skill were right with no hint. A right
+    first try after a hint is skipped: it neither counts toward the streak nor breaks
+    it (a wrong one after a hint does break it). `history` is the student's step
+    answers. Answers by other students, and answers to problems or steps no longer in
+    the course (it may have been edited since), are ignored. A skill missing from the
+    state counts as new (START_MASTERY).
     Stops with a ValueError if the state is for a different course, or if the answer
     times cannot be put in order (some with a time zone and some without).
     """
@@ -178,12 +192,14 @@ def is_mastered(
             "The answer times mix ones with a time zone and ones without, so they "
             "cannot be put in order."
         ) from None
-    # The student's first tries on this skill, oldest first.
+    # The student's first tries on this skill, oldest first, leaving out right ones
+    # made after a hint.
     first_tries = [
         answer
         for answer in by_time
         if answer.nickname == state.nickname
         and answer.attempt == 1
+        and not _right_after_hint(answer)
         and _skill_of(course, answer) == skill_id
     ]
     last = first_tries[-MASTERY_STREAK:]  # the newest few (all of them if fewer)
@@ -216,6 +232,11 @@ def _check_course(state: MasteryState, course: Course) -> None:
 def _counts_as_right(answer: StepAnswer) -> bool:
     """A step counts as right only if it was answered right without any hint."""
     return answer.correct and answer.hints_used == 0
+
+
+def _right_after_hint(answer: StepAnswer) -> bool:
+    """True for a step answered right, but after reading a hint (partial credit)."""
+    return answer.correct and answer.hints_used > 0
 
 
 def _skill_of(course: Course, answer: StepAnswer) -> str | None:

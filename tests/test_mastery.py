@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from practice_engine.mastery import (
+    HINT_CREDIT,
     MASTERED,
     MASTERY_STREAK,
     START_MASTERY,
@@ -112,11 +113,11 @@ def test_wrong_step_never_raises_mastery_after_earlier_misses() -> None:
     low = state.mastery[NUMBER_SKILL]
 
     # A wrong choice step on the same skill (problem drag_crate step 3, 3 options), slow,
-    # fast or hinted, must not lift it.
+    # fast or after a hint, must not lift it.
     for wrong in (
         answer(3, correct=False, seconds=20),
         answer(3, correct=False, seconds=2),
-        answer(3, correct=True, hints_used=1),
+        answer(3, correct=False, hints_used=1),
     ):
         wrong = wrong.model_copy(update={"problem_id": "drag_crate"})
         after = update_mastery(state, wrong, course)
@@ -232,11 +233,29 @@ def test_second_try_leaves_mastery_unchanged() -> None:
         assert after is not state  # a copy, so changing it cannot change the original
 
 
-def test_right_after_a_hint_counts_as_wrong() -> None:
+def test_right_after_a_hint_gets_half_the_rise_of_a_right_answer() -> None:
     course = load_course(COURSE)
     state = new_mastery_state(course, "sam")
 
-    hinted = update_mastery(state, answer(1, correct=True, hints_used=1), course)
+    # A right answer with no hint on the number step goes from 0.1 to 0.354717 (see
+    # test_matches_hand_computed_examples). After a hint, only half of that rise is kept:
+    #   0.1 + (0.354717 - 0.1) x 0.5 = 0.227358
+    hinted = update_mastery(state, answer(2, correct=True, hints_used=1), course)
+    assert hinted.mastery[NUMBER_SKILL] == pytest.approx(0.227358, abs=1e-6)
+    assert HINT_CREDIT == 0.5
+
+    # The same holds on a choice step: above where it started, below a right answer.
+    plain = update_mastery(state, answer(1, correct=True), course)
+    hinted_choice = update_mastery(state, answer(1, correct=True, hints_used=2), course)
+    rise = plain.mastery[CHOICE_SKILL] - START_MASTERY
+    assert hinted_choice.mastery[CHOICE_SKILL] == pytest.approx(START_MASTERY + rise / 2)
+
+
+def test_wrong_after_a_hint_is_an_ordinary_wrong_answer() -> None:
+    course = load_course(COURSE)
+    state = new_mastery_state(course, "sam")
+
+    hinted = update_mastery(state, answer(1, correct=False, hints_used=1), course)
     wrong = update_mastery(state, answer(1, correct=False), course)
 
     assert hinted.mastery[CHOICE_SKILL] == wrong.mastery[CHOICE_SKILL]
@@ -275,9 +294,15 @@ def test_mastered_needs_the_number_and_a_streak() -> None:
     assert is_mastered(state, history, CHOICE_SKILL, course) is True
     # The number alone is not enough: with too few answers there is no streak.
     assert is_mastered(state, history[: MASTERY_STREAK - 1], CHOICE_SKILL, course) is False
-    # A right answer after a hint breaks the streak, even with the same high number.
+    # A right answer after a hint is skipped: it neither breaks the streak ...
     hinted = answer(1, correct=True, hints_used=1, minute=10)
-    assert is_mastered(state, [*history, hinted], CHOICE_SKILL, course) is False
+    assert is_mastered(state, [*history, hinted], CHOICE_SKILL, course) is True
+    # ... nor counts toward one: two right answers plus a hinted one are not enough.
+    two_and_hinted = [*history[:2], hinted]
+    assert is_mastered(state, two_and_hinted, CHOICE_SKILL, course) is False
+    # A wrong answer after a hint is a miss, so it does break the streak.
+    hinted_miss = answer(1, correct=False, hints_used=1, minute=12)
+    assert is_mastered(state, [*history, hinted_miss], CHOICE_SKILL, course) is False
     # A second try is not a first try, so it neither breaks nor builds the streak.
     retry = answer(1, correct=False, attempt=2, minute=11)
     assert is_mastered(state, [*history, retry], CHOICE_SKILL, course) is True
