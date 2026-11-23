@@ -32,7 +32,8 @@ check_saved_answers lists them so the change can be looked at.
 
 The helpers:
 
-- open_storage(path): open the file, making it and its tables if needed.
+- open_storage(path): open the file, making it and its tables if needed. A file made
+  by an older version (an older SCHEMA_VERSION) is refused with a plain message.
 - save_answer(db, course, answer, given=None): check and save one step answer.
   True if it was new, False if the same answer was already saved.
 - load_history(db, course, nickname): the student's saved answers, oldest first.
@@ -119,6 +120,11 @@ CREATE TABLE IF NOT EXISTS picks (
 );
 """
 
+# The layout of the tables above, as a number SQLite keeps inside the file (its
+# "user_version"). Raise it whenever the layout or the meaning of a column changes.
+# 1: picks has a rule column, and `given` is JSON text.
+SCHEMA_VERSION = 1
+
 # One delete for every table that holds rows about a student, for forget_student.
 FORGET_QUERIES = (
     "DELETE FROM students WHERE nickname = ?",
@@ -135,11 +141,22 @@ _ADD_STUDENT = (
 def open_storage(path: str | Path) -> sqlite3.Connection:
     """Open the file at `path`, making it and its tables if they do not exist yet.
 
-    Close it when done, for example with `contextlib.closing`.
+    Stops with a ValueError if the file was made by an older version of the engine
+    (its tables have a different layout), rather than failing later or mixing old and
+    new kinds of rows. Close it when done, for example with `contextlib.closing`.
     """
     db = sqlite3.connect(path)
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    has_tables = db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
+    if has_tables and version != SCHEMA_VERSION:
+        db.close()
+        raise ValueError(
+            f"The file {path} was made by an older version of the engine (layout "
+            f"{version}, not {SCHEMA_VERSION}), so it cannot be read safely. Start a new file."
+        )
     with db:
         db.executescript(SCHEMA)
+        db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")  # a fixed number, not user text
     return db
 
 

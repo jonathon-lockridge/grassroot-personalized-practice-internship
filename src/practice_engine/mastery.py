@@ -156,11 +156,12 @@ def update_mastery(state: MasteryState, answer: StepAnswer, course: Course) -> M
 
     # A really wrong answer given very fast looks like a guess: keep only part of the
     # change from `before`. A hinted answer is not a fast guess, so it is left out.
-    if not answer.correct and answer.hints_used == 0 and answer.seconds < FAST_ANSWER_SECONDS:
+    wrong_without_hint = not answer.correct and answer.hints_used == 0
+    if wrong_without_hint and answer.seconds < FAST_ANSWER_SECONDS:
         after = before + (after - before) * FAST_WRONG_WEIGHT
 
     # A right answer after a hint is partial credit: keep only part of the rise.
-    if answer.correct and answer.hints_used > 0:
+    if right_after_hint(answer):
         after = before + (after - before) * HINT_CREDIT
 
     if not right:

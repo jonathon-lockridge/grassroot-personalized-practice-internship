@@ -457,3 +457,37 @@ def test_each_pick_is_saved_with_the_rule_that_made_it(course: Course, path: Pat
         loaded = [pick.rule for _, pick in load_picks(db, course, "sam")]
     assert rows == [("follow_up",), ("new_skill",)]
     assert loaded == ["follow_up", "new_skill"]
+
+
+# A file made before picks had a rule column (and before `given` was JSON text) cannot
+# be read safely, so it is refused with a plain message instead of failing later.
+OLD_PICKS_TABLE = """
+CREATE TABLE picks (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    nickname TEXT NOT NULL,
+    course_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    problem_id TEXT NOT NULL,
+    target_skill TEXT NOT NULL,
+    is_follow_up INTEGER NOT NULL,
+    missed_problem_id TEXT,
+    missed_step_position INTEGER,
+    reason TEXT NOT NULL
+);
+"""
+
+
+def test_a_file_from_before_the_current_layout_is_refused_plainly(path: Path) -> None:
+    with closing(sqlite3.connect(path)) as old:
+        old.executescript(OLD_PICKS_TABLE)
+
+    with pytest.raises(ValueError, match="older version"):
+        open_storage(path)
+
+
+def test_a_new_file_opens_again_after_closing(course: Course, path: Path) -> None:
+    with closing(open_storage(path)) as db:
+        save(db, course, answer(2, True))
+    with closing(open_storage(path)) as db:
+        assert len(load_history(db, course, "sam")) == 1

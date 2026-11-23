@@ -30,6 +30,7 @@ from practice_engine.selection import (
     PICK_RULES,
     READY_MASTERY,
     STUCK_STEPS,
+    SUCCESS_FLOOR,
     WATCH_CLEAR_RIGHTS,
     MissedStep,
     Pick,
@@ -381,13 +382,14 @@ def test_stuck_with_no_prerequisite_gets_the_easiest_problem() -> None:
 
 def test_stuck_partway_skill_steps_back_too() -> None:
     course = tiny_course(
-        {"a": [], "b": ["a"]}, [("pb", 1, ["b"]), ("pb2", 1, ["b"]), ("pa", 1, ["a"])]
+        {"a": [], "b": ["a"]},
+        [("pb", 1, ["b"]), ("pb2", 1, ["b"]), ("pb3", 1, ["b"]), ("pa", 1, ["a"])],
     )
-    # Nine first tries on b, the last two right in different problems, so b is off the
-    # watch list and there is no follow-up.
+    # Nine first tries on b, the last two right in two problems other than the one
+    # with the misses, so b is off the watch list and there is no follow-up.
     history = misses("pb", STUCK_STEPS - 1) + [
-        answer("pb", 1, True, LAST_WEEK + timedelta(hours=1)),
-        answer("pb2", 1, True, LAST_WEEK + timedelta(hours=2)),
+        answer("pb2", 1, True, LAST_WEEK + timedelta(hours=1)),
+        answer("pb3", 1, True, LAST_WEEK + timedelta(hours=2)),
     ]
     mastery = {"a": READY_MASTERY + 0.05, "b": 0.4}
 
@@ -1371,11 +1373,12 @@ def test_a_stuck_follow_up_says_stuck_and_is_still_a_follow_up() -> None:
 
 def test_a_stuck_partway_skill_says_stuck() -> None:
     course = tiny_course(
-        {"a": [], "b": ["a"]}, [("pb", 1, ["b"]), ("pb2", 1, ["b"]), ("pa", 1, ["a"])]
+        {"a": [], "b": ["a"]},
+        [("pb", 1, ["b"]), ("pb2", 1, ["b"]), ("pb3", 1, ["b"]), ("pa", 1, ["a"])],
     )
     history = misses("pb", STUCK_STEPS - 1) + [
-        answer("pb", 1, True, LAST_WEEK + timedelta(hours=1)),
-        answer("pb2", 1, True, LAST_WEEK + timedelta(hours=2)),
+        answer("pb2", 1, True, LAST_WEEK + timedelta(hours=1)),
+        answer("pb3", 1, True, LAST_WEEK + timedelta(hours=2)),
     ]
     mastery = {"a": READY_MASTERY + 0.05, "b": 0.4}
 
@@ -1582,7 +1585,8 @@ def unseen_pick(seen: list[str]) -> str:
 
 
 def test_an_unseen_problem_beats_a_seen_one_that_fits_better() -> None:
-    assert unseen_pick([]) == "p_a_lo"  # the most left to learn (p_a was seen)
+    # p_a was seen. p_a_lo has the most left to learn but is below SUCCESS_FLOOR.
+    assert unseen_pick([]) == "p_a_hi"
     assert unseen_pick(["p_a_lo"]) == "p_a_hi"
     assert unseen_pick(["p_a_lo", "p_a_hi"]) == "p_a_hi_hi"
 
@@ -1594,8 +1598,8 @@ def test_an_unseen_problem_outside_the_target_beats_a_seen_one_inside_it() -> No
 
 def test_a_seen_problem_is_used_when_no_unseen_one_is_left() -> None:
     # Every a problem was seen last week, so the later items decide again: the most
-    # left to learn.
-    assert unseen_pick(["p_a_lo", "p_a_hi", "p_a_hi_hi"]) == "p_a_lo"
+    # left to learn among those at or above SUCCESS_FLOOR (p_a_lo, at 0.40, is below).
+    assert unseen_pick(["p_a_lo", "p_a_hi", "p_a_hi_hi"]) == "p_a"
 
 
 def test_answering_any_step_of_a_problem_makes_it_seen() -> None:
@@ -1799,3 +1803,63 @@ def test_left_to_learn_leaves_out_a_skill_in_every_problem() -> None:
     )
 
     assert ids(picks) == ["p_short"]
+
+
+# Review board fixes (2026-11-22).
+
+
+def test_steps_on_skills_that_are_not_ready_do_not_count_as_left_to_learn() -> None:
+    # b and c build on a and are far from ready. p_mixed looks like it has the most
+    # left to learn, but only because of b and c steps the student cannot do yet.
+    course = tiny_course(
+        {"a": [], "b": ["a"], "c": ["b"], "d": []},
+        [
+            ("p0", 1, ["a"]),
+            ("p_easy", 1, ["a", "a"]),
+            ("p_mixed", 1, ["a", "b", "c"]),
+            ("p_d", 1, ["d"]),
+        ],
+    )
+    history = [answer("p0", 1, True, LAST_WEEK)]
+    mastery = {"a": 0.6, "b": 0.1, "c": 0.1, "d": 0.1}
+
+    picks = next_problems(course, state(mastery), history, NOW, count=1)
+
+    assert picks[0].target_skill == "a"
+    assert ids(picks) == ["p_easy"]
+
+
+def test_a_problem_predicted_below_the_floor_does_not_beat_one_above_it() -> None:
+    # p_a_lo_lo has far more left to learn, but the student is predicted to get only
+    # about a third of it right; p_a_hi is inside the 70 to 85 percent target.
+    course = tiny_course(
+        SUCCESS_SKILLS,
+        [
+            ("p_a", 1, ["a"]),
+            ("p_a_lo_lo", 1, ["a", "lo", "lo"]),  # (0.59 + 0.2 + 0.2) / 3 = 0.33
+            ("p_a_hi", 1, ["a", "hi"]),  # (0.59 + 0.85) / 2 = 0.72
+            OTHER_PROBLEM,
+        ],
+    )
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), A_TRIED, NOW, count=1)
+
+    assert SUCCESS_FLOOR == 0.5
+    assert ids(picks) == ["p_a_hi"]
+
+
+def test_a_right_answer_in_the_problem_of_the_miss_does_not_count_toward_clearing() -> None:
+    # Step 2 of p_two_a, minutes after missing step 1 of the same problem, is short-term
+    # memory of the feedback, not evidence the skill was kept. So after it and one
+    # right in p2, the skill has been right in only one other problem: still watched.
+    history = [
+        answer("p_two_a", 1, False, hours_ago(3)),
+        answer("p_two_a", 2, True, hours_ago(3) + timedelta(minutes=2)),
+        answer("p2", 1, True, hours_ago(2)),
+    ]
+
+    picks = watch_picks(history)
+
+    assert picks[0].is_follow_up is True
+    assert picks[0].missed_step == MissedStep(problem_id="p_two_a", step_position=1)
+    assert "right once since" in picks[0].reason

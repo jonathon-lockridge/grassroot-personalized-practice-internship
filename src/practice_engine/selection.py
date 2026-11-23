@@ -24,8 +24,10 @@ The rules, most important first:
    on the first try, with no hint, in WATCH_CLEAR_RIGHTS (2) different problems after
    the latest miss; a new miss starts that count over (Stanford review, 2026-11-22).
    One right answer is weak evidence, as a choice step can be guessed. Two rights in
-   the same problem count once. If the skill builds on a skill that
-   is not ready yet, practice that earlier skill instead, and say so. If the missed
+   the same problem count once, and the problem of the miss itself does not count:
+   a later step of it, minutes after the feedback, shows short-term memory. If the
+   skill builds on a skill that is not ready yet, practice that earlier skill
+   instead, and say so. If the missed
    step's skill is in every problem (see "Throughout"), practice the skill rule 3 or
    5 would pick first instead, and say so; this comes after the other follow-ups, so
    it never takes a skill that has a follow-up of its own. (rule "follow_up")
@@ -57,12 +59,17 @@ Throughout:
 - A skill is "ready" only when every skill it builds on is known well enough. A
   skill that is not ready is not picked by rules 3 and 5. A course with no
   prerequisites at all switches this off.
+- Not too hard: a problem the student is predicted to get less than SUCCESS_FLOOR
+  (50 percent) of steps right on never beats one at or above it (review board,
+  2026-11-22): mostly-wrong practice is discouraging and teaches little.
 - Most left to learn: for each skill, prefer the problem with the most the student
   probably still has to learn, the average over its steps of 1 minus the skill's
   number (see left_to_learn), so fewer steps go on skills they already know (T6
   tuning, 2026-11-22; the goal is learning per minute of practice). A problem padded
   with steps on known skills wastes the student's time, even though those easy
-  steps raise its predicted share of steps right.
+  steps raise its predicted share of steps right. A step on a skill that is not
+  ready counts as nothing left to learn, so a problem full of skills the student
+  cannot do yet does not win this way.
 - Then, among problems with the same left to learn, prefer one the student should
   get about 70 to 85 percent of steps right on, closest to the middle, then the
   lower difficulty (research report, change 7). When no problem is inside that range
@@ -73,7 +80,8 @@ Throughout:
   beats one they have seen, even one inside the 70 to 85 percent range, because a
   seen problem's predicted share leaves out what the student remembers of it, and
   practice works best when the student must recall the skill, not an answer
-  (Stanford review, 2026-11-22). This comes before "most left to learn". For a stuck
+  (Stanford review, 2026-11-22). This comes before "not too hard" and "most left to
+  learn". For a stuck
   skill's easiest problem, the lowest difficulty still comes first and unseen only
   breaks ties; left to learn is not used there.
 - Each pick in a batch practices a different skill, up to three skills; two picks in
@@ -90,13 +98,13 @@ Throughout:
 - No problem the student answered any step of in the last 24 hours.
 
 When no problem fits a skill, the rules are loosened for that skill in this order:
-any predicted success, then problems seen before, then problems seen in the last 24
-hours. Only after every
-skill from rules 2 to 5 has been tried is the last rule loosened: any skill (rule
-"relaxed", also used when a skill fills a second place in the batch). Loosening
-inside one skill keeps that skill's rule. The list is never empty while the course
-has a problem with at least one step. No randomness: remaining ties go to whichever
-skill or problem comes first in the course file.
+any predicted success (first below the 70 to 85 percent target, then below
+SUCCESS_FLOOR), then problems seen before, then problems seen in the last 24 hours
+(see _fit). Only after every skill from rules 2 to 5 has been tried is the last rule
+loosened: any skill (rule "relaxed", also used when a skill fills a second place in
+the batch). Loosening inside one skill keeps that skill's rule. The list is never
+empty while the course has a problem with at least one step. No randomness:
+remaining ties go to whichever skill or problem comes first in the course file.
 
 How to read this file: see the note at the top of models.py. Also,
 `key=lambda x: ...` tells sorted(), min() or max() what to compare each item by.
@@ -140,6 +148,10 @@ STUCK_BELOW = 0.5
 REPEAT_HOURS = 24
 # The predicted share of steps right to aim for: from 70 to 85 percent.
 TARGET_SUCCESS = (0.70, 0.85)
+# A problem the student is predicted to get less than this share of right never beats
+# one at or above it, however much it has left to learn: mostly-wrong practice is
+# discouraging and teaches little (PRD decision 4).
+SUCCESS_FLOOR = 0.5
 # A batch practices at most this many different skills.
 MAX_BATCH_SKILLS = 3
 # A batch of 3 or more has at most this many follow-ups, so there is room for
@@ -231,9 +243,9 @@ def next_problems(
 
     selector = _Selector(course, state, history, now, skill_of_step)
     picks: list[Pick] = []
-    # Each skill gets its own loosening (any predicted success, then problems seen in
-    # the last 24 hours, both built into best_problem) before the next skill is tried,
-    # so a less important skill never pushes a more important one out.
+    # Each skill gets its own loosening (built into best_problem; see _fit for the
+    # order) before the next skill is tried, so a less important skill never pushes a
+    # more important one out.
 
     # Rule 2: the follow-ups, but never the whole batch.
     max_follow_ups = 1 if count <= 2 else MAX_FOLLOW_UPS
@@ -475,8 +487,11 @@ class _Selector:
             if not misses:
                 continue
             latest = misses[-1]
-            # Each problem counts once, however many of its steps were right.
+            # Each problem counts once, however many of its steps were right. The problem
+            # of the miss itself does not count: a later step of it, minutes after the
+            # miss and its feedback, shows short-term memory, not that the skill was kept.
             right_in = {answer.problem_id for answer in tries[latest + 1 :]}
+            right_in.discard(tries[latest].problem_id)
             if len(right_in) < WATCH_CLEAR_RIGHTS:
                 watched.append((tries[latest], len(right_in)))
         # Newest miss first. sorted() keeps course order for misses at the same time.
@@ -749,14 +764,20 @@ class _Selector:
         chances = [chance_correct(self.state, step) for step in problem.steps]
         return sum(chances) / len(chances)
 
-    def left_to_learn(self, problem: Problem) -> float:
-        """How much of the problem the student most likely still has to learn: for each
-        step, 1 minus the mastery of its skill, averaged over the steps. A skill in every
-        problem is left out (every problem has it, so it tells problems nothing apart),
-        unless the problem has nothing else."""
+    def left_to_learn(self, problem: Problem, target_skill: str) -> float:
+        """How much of the problem the student most likely can learn now: for each step,
+        1 minus the mastery of its skill, averaged over the steps. A step on a skill that
+        is not ready (and is not the target skill) counts as 0: the student cannot yet
+        build it, so it is not learning time but a step they will most likely get wrong.
+        A skill in every problem is left out (every problem has it, so it tells problems
+        nothing apart), unless the problem has nothing else."""
         steps = [step for step in problem.steps if step.skill not in self.everywhere]
         steps = steps or problem.steps
-        left = sum(1 - self.mastery[step.skill] for step in steps) / len(steps)
+        left = sum(
+            1 - self.mastery[step.skill]
+            for step in steps
+            if step.skill == target_skill or self.is_ready(step.skill)
+        ) / len(steps)
         # Rounded, so two problems whose numbers differ only by computer rounding
         # still count as a tie and the later items decide.
         return round(left, 6)
@@ -766,7 +787,8 @@ class _Selector:
 
         The loosening order is built into the comparison (see _fit): any problem not
         answered in the last 24 hours beats one that was, any problem never seen beats
-        one seen before, and then the most left to learn wins, before TARGET_SUCCESS.
+        one seen before, one at or above SUCCESS_FLOOR beats one below it, and then the
+        most left to learn wins, before TARGET_SUCCESS.
         For a stuck target with nothing to step back to (`easiest`), the success target
         is not used: the lowest difficulty wins, then an unseen problem.
         """
@@ -789,9 +811,9 @@ class _Selector:
                 ),
             )
         # min() keeps the first of equal problems, so course order breaks ties.
-        return min(candidates, key=lambda problem: self._fit(problem, previous))
+        return min(candidates, key=lambda problem: self._fit(problem, previous, target.skill))
 
-    def _fit(self, problem: Problem, previous: Problem) -> tuple:
+    def _fit(self, problem: Problem, previous: Problem, target_skill: str) -> tuple:
         """How well a problem fits; smaller is better. Compared item by item:
 
         1. not answered in the last 24 hours first;
@@ -800,19 +822,22 @@ class _Selector:
            before the success target, because the predicted share of a seen problem
            leaves out what the student remembers of it, so "inside the target" is not
            trustworthy there;
-        3. the most left to learn (see left_to_learn): fewer steps on skills the
-           student already knows. For steps that type in a number, more left to
-           learn always means a lower predicted share, so items 4 to 6 mostly decide
-           between problems that differ in their choice or order steps;
-        4. inside TARGET_SUCCESS first;
-        5. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
+        3. predicted share right at or above SUCCESS_FLOOR first, so a problem the
+           student would get mostly wrong never wins while a gentler one is there;
+        4. the most left to learn (see left_to_learn): fewer steps on skills the
+           student already knows, and none on skills not ready yet. For steps that
+           type in a number, more left to learn always means a lower predicted share,
+           so items 5 to 7 mostly decide between problems that differ in their choice
+           or order steps;
+        5. inside TARGET_SUCCESS first;
+        6. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
            predicted share is a weak guide there (a hard problem with many guessable
            choice steps can look easier than an easy one);
-        6. closest to the middle of the target;
-        7. the lower difficulty;
-        8. mixing: a first step whose answer differs from the previous problem's;
-        9. mixing topics: a problem whose skills share no family with the previous
-           problem's (see skill_families).
+        7. closest to the middle of the target;
+        8. the lower difficulty;
+        9. mixing: a first step whose answer differs from the previous problem's;
+        10. mixing topics: a problem whose skills share no family with the previous
+            problem's (see skill_families).
         """
         low, high = TARGET_SUCCESS
         success = self.success(problem)
@@ -827,7 +852,8 @@ class _Selector:
         return (
             problem.id in self.recent,
             problem.id in self.seen,
-            -self.left_to_learn(problem),  # the minus sign: more left to learn first
+            success < SUCCESS_FLOOR,
+            -self.left_to_learn(problem, target_skill),  # the minus sign: more left to learn first
             outside,
             difficulty_if_outside,
             distance,
