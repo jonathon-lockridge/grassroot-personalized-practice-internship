@@ -55,7 +55,7 @@ Students don't know what they don't know. Left to choose, they grind problems th
 ## How we'll know it works
 
 - **It finds the struggle.** With test students, the step the engine flags as weak matches what the student says they struggled with in most practice sessions (target: 4 of 5).
-- **Learning, not volume.** Simulated students reach mastery in fewer steps with the engine's order than with a random or a fixed order. With real test students, scores on a short check at the end are higher than on the same check at the start.
+- **Learning, not volume.** The main measure is how much a student learns per minute of practice. Simulated students must do better with the engine's order than with a random or a fixed order on both counts: more of them learn every skill, and they know more after 100, 200 and 300 steps (Jonathon, 2026-11-22). With real test students, scores on a short check at the end are higher than on the same check at the start.
 - **Explainable.** Every pick has a reason a student understands.
 - **Works for any course.** Swapping in a second course is a data change, not a code change, and everything still works.
 - **Good for its builder first.** Jonathon practices with it for his own Physics C test and finds the problems and the follow-ups useful before anyone else tries it.
@@ -92,6 +92,9 @@ Each with the strongest argument against it, so future-us knows why.
 9. **Every problem starts with "Which principle applies?", and every wrong option says why it is wrong.** Experts sort physics problems by principle, beginners by surface features; and feedback that explains why helps far more than right/wrong alone. Typed numbers accept "1,400" and a copied minus sign, and unreadable text asks the student to retype instead of counting as wrong. (Decided 2026-11-20.) *Against:* longer problems and more writing per problem. *Safeguard:* the course checker refuses a wrong option without its message, so none are forgotten.
 10. **A skill that every problem practices is tracked but is never the reason a problem is picked; and when no problem fits the 70 to 85% target, the easiest difficulty comes first.** (Jonathon, 2026-11-20.) *Against:* easy problems dominate until a student is fairly strong (about 0.75 mastery). *Safeguard:* T6 tests whether that slows learning.
 
+11. **A missed skill keeps coming back until it is right on the first try, with no hint, in 2 other problems; unseen problems come before seen ones; and among equal choices, a batch alternates between unrelated topics.** (Stanford-style review, approved by Jonathon 2026-11-22.) One right answer is weak evidence, since a choice step can be guessed; and practice on a new problem teaches more than redoing a remembered one. *Against:* a missed skill takes 2 of every 3 places for longer, which slowed some simulated students. *Safeguard:* new skills and reviews still always get a place, and T6 checks it.
+12. **For each skill, the engine prefers the problem with the most still to learn, as long as the student should get at least half the steps right.** (2026-11-22, from T6.) *Against:* this comes before the 70 to 85% target of decision 4, so the two disagree. *Safeguard:* open question below for Jonathon.
+
 ## If it ever plugs into Grassroot
 
 Grassroot's platform would talk to the engine with four kinds of request, each carrying an anonymous student id and a secret code that proves it is Grassroot: record a step answer, get the next problems (with reasons), get the student's mastery per skill, and forget a student. At that point Grassroot's rules apply in full: no personal data in the engine, children's and students' data laws (COPPA, FERPA), deletion within 60 days, data stored in Postgres (the database system Grassroot uses) instead of the local file, and Grassroot's public promise that learner data is never used to train AI models. Nothing in the current plan conflicts with those.
@@ -114,4 +117,5 @@ Looked up 2026-11-18. None of these changes the plan; each is something to borro
 - [x] Web page or not? Yes: a page that mocks Grassroot, with only practice working. (Mentor, 2026-11-19)
 - [ ] How many test students can we get, and when? Needed by step T8. (Jonathon)
 - [ ] Should this eventually plug into Grassroot? Ask once there is something to show. (mentor)
+- [ ] When they clash, which wins: the problem with the most left to learn, or the one the student should get 70 to 85% right? (Jonathon)
 - [x] When a student gets a step right, should the skills underneath it also rise a little? Not for now: the only support is company claims, not studies. Revisit after T6. (2026-11-20)
