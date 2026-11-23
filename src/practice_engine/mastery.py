@@ -14,7 +14,7 @@ about what the student knew. A right first try made after reading a hint counts 
 half a right answer (decided 2026-11-20): the student did some of the work, but not
 alone. A wrong first try after a hint is an ordinary wrong answer.
 
-Four helpers:
+Four main helpers:
 
 - new_mastery_state(course, nickname): a new student's state, every skill at the
   starting value.
@@ -24,6 +24,17 @@ Four helpers:
   mastered: a high number and a short streak of right first tries with no hint.
 - chance_correct(state, step): how likely the student is to get a step right on the
   first try, for the next-problem rules.
+
+And small shared ones, also used by selection.py and storage.py so the engine has
+one version of each:
+
+- has_mastery_streak(first_tries): the streak half of is_mastered, for a list of
+  one skill's first tries that the caller already has.
+- counts_as_right(answer): right with no hint. right_after_hint(answer): right, but
+  after a hint.
+- find_step(course, problem_id, step_position): one step, or a plain ValueError.
+- step_table(course): a look-up table (problem id, step position) -> step, built once
+  so a long history does not search the whole course for every answer.
 
 Nothing here knows about algebra or physics, and nothing here touches the web
 server or stored data.
@@ -110,7 +121,7 @@ def update_mastery(state: MasteryState, answer: StepAnswer, course: Course) -> M
             f"This answer is from '{answer.nickname}', but the mastery state is "
             f"for '{state.nickname}'."
         )
-    step = _find_step(course, answer.problem_id, answer.step_position)
+    step = find_step(course, answer.problem_id, answer.step_position)
     before = state.mastery.get(step.skill)
     # A missing skill or an impossible number means the state and the course do not
     # match; say so instead of guessing. (`not 0 <= before <= 1` also catches "nan",
@@ -192,18 +203,29 @@ def is_mastered(
             "The answer times mix ones with a time zone and ones without, so they "
             "cannot be put in order."
         ) from None
+    steps = step_table(course)
     # The student's first tries on this skill, oldest first, leaving out right ones
-    # made after a hint.
+    # made after a hint. A step no longer in the course gives None, so it is left out.
     first_tries = [
         answer
         for answer in by_time
         if answer.nickname == state.nickname
         and answer.attempt == 1
-        and not _right_after_hint(answer)
-        and _skill_of(course, answer) == skill_id
+        and _skill_in(steps, answer) == skill_id
     ]
-    last = first_tries[-MASTERY_STREAK:]  # the newest few (all of them if fewer)
-    return len(last) == MASTERY_STREAK and all(_counts_as_right(answer) for answer in last)
+    return has_mastery_streak(first_tries)
+
+
+def has_mastery_streak(first_tries: list[StepAnswer]) -> bool:
+    """True if the newest MASTERY_STREAK of these first tries were right with no hint.
+
+    `first_tries` is one student's first tries on one skill, oldest first. A right one
+    after a hint is skipped: it neither counts toward the streak nor breaks it. This
+    is the streak half of is_mastered, for callers that already have the list.
+    """
+    counted = [answer for answer in first_tries if not right_after_hint(answer)]
+    last = counted[-MASTERY_STREAK:]  # the newest few (all of them if fewer)
+    return len(last) == MASTERY_STREAK and all(counts_as_right(answer) for answer in last)
 
 
 def chance_correct(state: MasteryState, step: Step, course: Course | None = None) -> float:
@@ -229,26 +251,21 @@ def _check_course(state: MasteryState, course: Course) -> None:
         )
 
 
-def _counts_as_right(answer: StepAnswer) -> bool:
+def counts_as_right(answer: StepAnswer) -> bool:
     """A step counts as right only if it was answered right without any hint."""
     return answer.correct and answer.hints_used == 0
 
 
-def _right_after_hint(answer: StepAnswer) -> bool:
+def right_after_hint(answer: StepAnswer) -> bool:
     """True for a step answered right, but after reading a hint (partial credit)."""
     return answer.correct and answer.hints_used > 0
 
 
-def _skill_of(course: Course, answer: StepAnswer) -> str | None:
-    """The skill of the step `answer` is for, or None if the course has no such step."""
-    try:
-        return _find_step(course, answer.problem_id, answer.step_position).skill
-    except ValueError:
-        return None
+def find_step(course: Course, problem_id: str, step_position: int) -> Step:
+    """The step at `step_position` (counting from 1) of the problem with `problem_id`.
 
-
-def _find_step(course: Course, problem_id: str, step_position: int) -> Step:
-    """The step at `step_position` (counting from 1) of the problem with `problem_id`."""
+    Stops with a plain message (a ValueError) if the course has no such problem or step.
+    """
     for problem in course.problems:
         if problem.id == problem_id:
             if not 1 <= step_position <= len(problem.steps):
@@ -258,6 +275,25 @@ def _find_step(course: Course, problem_id: str, step_position: int) -> Step:
                 )
             return problem.steps[step_position - 1]  # the list counts from 0
     raise ValueError(f"There is no problem '{problem_id}' in course '{course.id}'.")
+
+
+def step_table(course: Course) -> dict[tuple[str, int], Step]:
+    """Look-up table: (problem id, step position counting from 1) -> that step.
+
+    Build it once and look steps up in it, instead of searching the course each time.
+    It is built fresh from the course, so it always matches the course as it is now.
+    """
+    return {
+        (problem.id, position): step
+        for problem in course.problems
+        for position, step in enumerate(problem.steps, start=1)
+    }
+
+
+def _skill_in(steps: dict[tuple[str, int], Step], answer: StepAnswer) -> str | None:
+    """The skill of the step `answer` is for, or None if the table has no such step."""
+    step = steps.get((answer.problem_id, answer.step_position))
+    return step.skill if step is not None else None
 
 
 def _guess_chance(step: Step) -> float:

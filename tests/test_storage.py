@@ -4,6 +4,7 @@ Every test uses its own new file in a temporary folder (pytest's `tmp_path`), so
 nothing here touches a real saved file.
 """
 
+import json
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime, timedelta, timezone
@@ -12,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from practice_engine.mastery import new_mastery_state, update_mastery
-from practice_engine.models import Course, StepAnswer, load_course
+from practice_engine.models import Course, Step, StepAnswer, load_course
 from practice_engine.selection import MissedStep, Pick
 from practice_engine.storage import (
     check_saved_answers,
@@ -67,6 +68,16 @@ def answer(
     )
 
 
+def save(db: sqlite3.Connection, course: Course, step_answer: StepAnswer) -> bool:
+    """Save an answer the way a truthful page would: a right answer comes with the
+    step's own answer as what the student gave, a wrong one with nothing given."""
+    given = None
+    if step_answer.correct:
+        problem = next(p for p in course.problems if p.id == step_answer.problem_id)
+        given = problem.steps[step_answer.step_position - 1].answer
+    return save_answer(db, course, step_answer, given=given)
+
+
 def some_answers() -> list[StepAnswer]:
     """A short session: right, wrong then right on a second try, right after a hint."""
     return [
@@ -81,7 +92,7 @@ def test_closing_and_reopening_keeps_mastery(course: Course, path: Path) -> None
     live = new_mastery_state(course, "sam")
     with closing(open_storage(path)) as db:
         for step_answer in some_answers():
-            save_answer(db, course, step_answer)
+            save(db, course, step_answer)
             live = update_mastery(live, step_answer, course)
 
     with closing(open_storage(path)) as db:
@@ -103,7 +114,7 @@ def test_replaying_saved_answers_gives_exactly_the_live_state(course: Course, pa
     live = new_mastery_state(course, "sam")
     with closing(open_storage(path)) as db:
         for step_answer in history:
-            save_answer(db, course, step_answer)
+            save(db, course, step_answer)
             live = update_mastery(live, step_answer, course)
         assert load_mastery(db, course, "sam") == live
 
@@ -116,8 +127,8 @@ def test_a_new_student_gets_the_starting_state(course: Course, path: Path) -> No
 
 def test_the_same_answer_sent_twice_is_stored_once(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
-        assert save_answer(db, course, answer(1, True)) is True
-        assert save_answer(db, course, answer(1, True)) is False
+        assert save(db, course, answer(1, True)) is True
+        assert save(db, course, answer(1, True)) is False
         assert load_history(db, course, "sam") == [answer(1, True)]
         (rows,) = db.execute("SELECT COUNT(*) FROM answers").fetchone()
         assert rows == 1
@@ -125,8 +136,8 @@ def test_the_same_answer_sent_twice_is_stored_once(course: Course, path: Path) -
 
 def test_a_second_try_is_not_a_duplicate(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(2, False, minute=1))
-        assert save_answer(db, course, answer(2, True, minute=1, attempt=2)) is True
+        save(db, course, answer(2, False, minute=1))
+        assert save(db, course, answer(2, True, minute=1, attempt=2)) is True
         assert len(load_history(db, course, "sam")) == 2
 
 
@@ -134,9 +145,9 @@ def test_a_clashing_answer_with_the_same_identity_is_refused(course: Course, pat
     # Same student, problem, step, try and time, but now marked wrong: one of the two
     # is a mistake, so it is refused instead of quietly keeping either.
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(1, True))
+        save(db, course, answer(1, True))
         with pytest.raises(ValueError, match="already saved"):
-            save_answer(db, course, answer(1, False))
+            save(db, course, answer(1, False))
         assert load_history(db, course, "sam") == [answer(1, True)]
 
 
@@ -149,7 +160,7 @@ def test_history_comes_back_oldest_first_and_equal_times_in_saving_order(
     same_time_b = answer(2, True, minute=2, attempt=2)
     with closing(open_storage(path)) as db:
         for step_answer in (late, same_time_a, same_time_b, first):
-            save_answer(db, course, step_answer)
+            save(db, course, step_answer)
         assert load_history(db, course, "sam") == [first, same_time_a, same_time_b, late]
 
 
@@ -161,7 +172,7 @@ def test_times_are_stored_in_utc_and_read_back_as_the_same_moment(
         update={"answered_at": datetime(2026, 11, 20, 5, 0, tzinfo=new_york)}
     )
     with closing(open_storage(path)) as db:
-        save_answer(db, course, local)
+        save(db, course, local)
         (stored,) = db.execute("SELECT answered_at FROM answers").fetchone()
         (loaded,) = load_history(db, course, "sam")
     assert stored == "2026-11-20T10:00:00.000000+00:00"
@@ -173,29 +184,29 @@ def test_a_time_without_a_time_zone_is_refused(course: Course, path: Path) -> No
     naive = answer(1, True).model_copy(update={"answered_at": datetime(2026, 11, 20, 10, 0)})
     with closing(open_storage(path)) as db:
         with pytest.raises(ValueError, match="time zone"):
-            save_answer(db, course, naive)
+            save(db, course, naive)
         assert load_history(db, course, "sam") == []
 
 
 def test_an_answer_to_a_step_the_course_lacks_is_refused(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
         with pytest.raises(ValueError, match="no step 9"):
-            save_answer(db, course, answer(9, True))
+            save_answer(db, course, answer(9, True), given="1")
         with pytest.raises(ValueError, match="no problem"):
-            save_answer(db, course, answer(1, True, problem_id="not_a_problem"))
+            save_answer(db, course, answer(1, True, problem_id="not_a_problem"), given="1")
 
 
 def test_each_answer_row_keeps_the_course_the_skill_and_the_given_answer(
     course: Course, path: Path
 ) -> None:
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(2, True), given="1200")
-        save_answer(db, course, answer(3, True, minute=1))
+        save_answer(db, course, answer(2, True), given="30")
+        save_answer(db, course, answer(3, False, minute=1))
         rows = db.execute(
             "SELECT course_id, skill_id, given FROM answers ORDER BY step_position"
         ).fetchall()
     assert rows == [
-        (course.id, "work_constant_force", "1200"),
+        (course.id, "work_constant_force", '"30"'),
         (course.id, "kinetic_energy", None),
     ]
 
@@ -204,7 +215,7 @@ def test_a_course_edit_that_moves_a_step_to_another_skill_is_noticed(
     course: Course, path: Path
 ) -> None:
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(2, True))
+        save(db, course, answer(2, True))
         assert check_saved_answers(db, course) == []
 
         edited = course.model_copy(deep=True)
@@ -220,7 +231,7 @@ def test_a_course_edit_that_moves_a_step_to_another_skill_is_noticed(
 
 def test_a_course_edit_that_removes_a_step_is_noticed(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(3, True))
+        save(db, course, answer(3, True))
         edited = course.model_copy(deep=True)
         edited.problems[0].steps.pop()  # push_cart loses step 3
         assert len(check_saved_answers(db, edited)) == 1
@@ -231,8 +242,8 @@ def test_mastery_still_counts_the_answers_that_fit_after_a_course_edit(
     course: Course, path: Path
 ) -> None:
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(2, True))
-        save_answer(db, course, answer(3, True, minute=1))
+        save(db, course, answer(2, True))
+        save(db, course, answer(3, True, minute=1))
         edited = course.model_copy(deep=True)
         edited.problems[0].steps[1].skill = "kinetic_energy"  # push_cart step 2 moves
         expected = update_mastery(
@@ -245,7 +256,7 @@ def test_a_seconds_value_that_is_not_a_number_is_refused(course: Course, path: P
     broken = answer(1, True).model_copy(update={"seconds": float("nan")})
     with closing(open_storage(path)) as db:
         with pytest.raises(ValueError, match="seconds"):
-            save_answer(db, course, broken)
+            save(db, course, broken)
         assert load_history(db, course, "sam") == []
 
 
@@ -256,8 +267,8 @@ def test_replay_follows_answer_time_not_the_order_answers_arrived(
     # late but carries an earlier time is replayed in its time order.
     early, late = answer(1, True, minute=0), answer(2, False, minute=5)
     with closing(open_storage(path)) as db:
-        save_answer(db, course, late)
-        save_answer(db, course, early)
+        save(db, course, late)
+        save(db, course, early)
         expected = new_mastery_state(course, "sam")
         for step_answer in (early, late):
             expected = update_mastery(expected, step_answer, course)
@@ -268,9 +279,9 @@ def test_replay_follows_answer_time_not_the_order_answers_arrived(
 def test_list_students_names_each_student_once(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
         assert list_students(db) == []
-        save_answer(db, course, answer(1, True, nickname="zoe"))
-        save_answer(db, course, answer(2, True, nickname="zoe", minute=1))
-        save_answer(db, course, answer(1, True, nickname="ali"))
+        save(db, course, answer(1, True, nickname="zoe"))
+        save(db, course, answer(2, True, nickname="zoe", minute=1))
+        save(db, course, answer(1, True, nickname="ali"))
         assert list_students(db) == ["ali", "zoe"]
         assert list_students(db, course.id) == ["ali", "zoe"]
         assert list_students(db, "another-course") == []
@@ -290,12 +301,14 @@ def a_batch() -> list[Pick]:
             is_follow_up=True,
             target_skill="work_constant_force",
             missed_step=MissedStep(problem_id="push_cart", step_position=2),
+            rule="follow_up",
         ),
         Pick(
             problem_id="spring_launch",
             reason="New skill: Potential energy.",
             is_follow_up=False,
             target_skill="potential_energy",
+            rule="new_skill",
         ),
     ]
 
@@ -319,9 +332,9 @@ def test_picks_are_saved_with_their_reasons_and_read_back_in_order(
 def test_forgetting_a_student_removes_every_row_about_them(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
         for step_answer in some_answers():
-            save_answer(db, course, step_answer)
+            save(db, course, step_answer)
         save_picks(db, course, "sam", a_batch(), START_TIME)
-        save_answer(db, course, answer(1, True, nickname="ali"))
+        save(db, course, answer(1, True, nickname="ali"))
         save_picks(db, course, "ali", a_batch()[:1], START_TIME)
 
         # 1 student row + 4 answers + 2 picks.
@@ -351,7 +364,7 @@ def test_forgetting_a_student_removes_every_row_about_them(course: Course, path:
 
 def test_forgetting_is_kept_after_reopening(course: Course, path: Path) -> None:
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(1, True))
+        save(db, course, answer(1, True))
         forget_student(db, "sam")
     with closing(open_storage(path)) as db:
         assert list_students(db) == []
@@ -362,7 +375,7 @@ def test_odd_nicknames_are_stored_as_plain_text(course: Course, path: Path) -> N
     # Values are passed separately from the SQL, so quotes in a nickname are just text.
     odd = "o'brien\"); DROP TABLE answers; --"
     with closing(open_storage(path)) as db:
-        save_answer(db, course, answer(1, True, nickname=odd))
+        save(db, course, answer(1, True, nickname=odd))
         assert list_students(db) == [odd]
         assert forget_student(db, odd) == 2
         db.execute("SELECT COUNT(*) FROM answers")  # the table is still there
@@ -373,3 +386,74 @@ def test_opening_the_same_file_twice_keeps_the_tables(path: Path) -> None:
         pass
     with closing(open_storage(path)) as db:
         assert isinstance(db, sqlite3.Connection)
+
+
+# The engine checks each answer itself, so a page cannot claim a wrong answer was right.
+
+
+def test_a_page_claiming_a_wrong_answer_was_right_is_refused(course: Course, path: Path) -> None:
+    # push_cart step 2's answer is 30.
+    with closing(open_storage(path)) as db:
+        with pytest.raises(ValueError, match="marked right, but '1200' is wrong"):
+            save_answer(db, course, answer(2, True), given="1200")
+        assert load_history(db, course, "sam") == []
+
+
+def test_a_page_claiming_a_right_answer_was_wrong_is_refused(course: Course, path: Path) -> None:
+    with closing(open_storage(path)) as db:
+        with pytest.raises(ValueError, match="marked wrong, but '30' is right"):
+            save_answer(db, course, answer(2, False), given="30")
+        assert load_history(db, course, "sam") == []
+
+
+def test_a_truthful_flag_is_saved_with_what_was_given(course: Course, path: Path) -> None:
+    with closing(open_storage(path)) as db:
+        assert save_answer(db, course, answer(2, True), given="30.0") is True
+        assert save_answer(db, course, answer(3, False, minute=1), given=4) is True
+        rows = db.execute("SELECT correct, given FROM answers ORDER BY seq").fetchall()
+        assert len(load_history(db, course, "sam")) == 2
+    assert rows == [(1, '"30.0"'), (0, "4")]
+
+
+def test_a_right_answer_with_nothing_given_is_refused(course: Course, path: Path) -> None:
+    with closing(open_storage(path)) as db:
+        with pytest.raises(ValueError, match="nothing was given"):
+            save_answer(db, course, answer(2, True))
+        assert load_history(db, course, "sam") == []
+
+
+def test_a_wrong_answer_with_nothing_given_is_saved(course: Course, path: Path) -> None:
+    # Such as a step the student gave up on: marking it wrong can only lower mastery.
+    with closing(open_storage(path)) as db:
+        assert save_answer(db, course, answer(2, False)) is True
+        assert load_history(db, course, "sam") == [answer(2, False)]
+
+
+def test_an_order_answer_is_checked_and_saved_as_a_list(course: Course, path: Path) -> None:
+    order = find_order_step(course)
+    right = list(order.answer)
+    wrong = list(reversed(right))
+    step_answer = answer(2, True, problem_id="spring_launch")
+    with closing(open_storage(path)) as db:
+        with pytest.raises(ValueError, match="marked right"):
+            save_answer(db, course, step_answer, given=wrong)
+        assert save_answer(db, course, step_answer, given=right) is True
+        (stored,) = db.execute("SELECT given FROM answers").fetchone()
+    assert json.loads(stored) == right
+
+
+def find_order_step(course: Course) -> Step:
+    """Step 2 of spring_launch, an order step."""
+    problem = next(problem for problem in course.problems if problem.id == "spring_launch")
+    step = problem.steps[1]
+    assert step.kind == "order"
+    return step
+
+
+def test_each_pick_is_saved_with_the_rule_that_made_it(course: Course, path: Path) -> None:
+    with closing(open_storage(path)) as db:
+        save_picks(db, course, "sam", a_batch(), START_TIME)
+        rows = db.execute("SELECT rule FROM picks ORDER BY seq").fetchall()
+        loaded = [pick.rule for _, pick in load_picks(db, course, "sam")]
+    assert rows == [("follow_up",), ("new_skill",)]
+    assert loaded == ["follow_up", "new_skill"]

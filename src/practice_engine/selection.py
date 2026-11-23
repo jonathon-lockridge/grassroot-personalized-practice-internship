@@ -3,8 +3,10 @@
 One main helper:
 
 - next_problems(course, state, history, now, count=3): a list of up to `count`
-  picks. Each pick names a problem, the skill it is meant to practice, and one plain
-  sentence telling the student why it was picked.
+  picks. Each pick names a problem, the skill it is meant to practice, one plain
+  sentence telling the student why it was picked, and `rule`: a short fixed word
+  saying which rule below made the pick (one of PICK_RULES), for checking and
+  counting the engine's choices.
 
 Only a step's first try counts as evidence here, as in mastery.py: a second try says
 little about what the student knew (research report, change 1). A wrong first try
@@ -16,23 +18,24 @@ The rules, most important first:
 
 1. A new student (no answers yet) gets a short starting check: one problem per
    skill that needs nothing before it, then problems that cover more skills,
-   easiest first.
+   easiest first. (rule "starting_check")
 2. Follow-up: for each skill the student missed (or needed a hint on) and has not
    got right since, practice that skill again, newest miss first. So a skill that
    keeps being missed comes back in every batch. If the skill builds on a skill that
    is not ready yet, practice that earlier skill instead, and say so. If the missed
    step's skill is in every problem (see "Throughout"), practice the skill rule 3 or
    5 would pick first instead, and say so; this comes after the other follow-ups, so
-   it never takes a skill that has a follow-up of its own.
+   it never takes a skill that has a follow-up of its own. (rule "follow_up")
    Stuck: if a skill has had many first tries and its number is still low, more of
    the same is not helping. Practice its weakest prerequisite that is not mastered
    instead, or, if there is none, the easiest problem for the skill (research
-   report, change 6). This also applies to rule 3.
+   report, change 6). This also applies to rule 3. (rule "stuck"; a stuck follow-up
+   is still a follow-up, so its is_follow_up stays True)
 3. Skills the student is partway through (tried at least once, not mastered),
-   weakest first.
+   weakest first. (rule "partway")
 4. Review: a mastered skill comes back after 1 day, then 3, 7, 14 and 30 days; a
-   miss starts the gaps over (research report, change 5).
-5. New skills: a skill never tried whose prerequisites are ready.
+   miss starts the gaps over (research report, change 5). (rule "review")
+5. New skills: a skill never tried whose prerequisites are ready. (rule "new_skill")
 
 Mixing, so a batch always moves forward (decided 2026-11-22):
 
@@ -65,9 +68,11 @@ Throughout:
 
 When no problem fits a skill, the rules are loosened for that skill in this order:
 any predicted success, then problems seen in the last 24 hours. Only after every
-skill from rules 2 to 5 has been tried is the last rule loosened: any skill. The
-list is never empty while the course has a problem with at least one step. No
-randomness: ties go to whichever skill or problem comes first in the course file.
+skill from rules 2 to 5 has been tried is the last rule loosened: any skill (rule
+"relaxed", also used when a skill fills a second place in the batch). Loosening
+inside one skill keeps that skill's rule. The list is never empty while the course
+has a problem with at least one step. No randomness: ties go to whichever skill or
+problem comes first in the course file.
 
 How to read this file: see the note at the top of models.py. Also,
 `key=lambda x: ...` tells sorted(), min() or max() what to compare each item by.
@@ -77,6 +82,7 @@ server or stored data.
 """
 
 from datetime import datetime, timedelta
+from typing import Literal, get_args
 
 from pydantic import BaseModel
 
@@ -85,8 +91,11 @@ from practice_engine.mastery import (
     MASTERY_STREAK,
     START_MASTERY,
     chance_correct,
-    is_mastered,
+    counts_as_right,
+    has_mastery_streak,
     new_mastery_state,
+    right_after_hint,
+    step_table,
     update_mastery,
 )
 from practice_engine.models import Course, MasteryState, Problem, StepAnswer
@@ -113,6 +122,11 @@ MAX_BATCH_SKILLS = 3
 # something new. (A batch of 2 has at most 1, and a batch of 1 is just the follow-up.)
 MAX_FOLLOW_UPS = 2
 
+# The rule that made a pick, one short fixed word each (see the list at the top).
+# `Literal` means a Pick may hold only one of these words; any other is refused.
+Rule = Literal["starting_check", "follow_up", "stuck", "partway", "review", "new_skill", "relaxed"]
+PICK_RULES: tuple[str, ...] = get_args(Rule)  # the same words, as a tuple, for counting
+
 
 class MissedStep(BaseModel):
     """The step a student got wrong that a follow-up pick answers to."""
@@ -128,6 +142,7 @@ class Pick(BaseModel):
     reason: str  # one plain sentence the student sees
     is_follow_up: bool  # True when picked because of a specific missed step
     target_skill: str  # the id of the skill this pick is meant to practice
+    rule: Rule  # which rule made this pick, one of PICK_RULES
     missed_step: MissedStep | None = None  # filled in only for a follow-up
 
 
@@ -136,6 +151,7 @@ class _Target(BaseModel):
 
     skill: str
     reason: str
+    rule: Rule
     missed_step: MissedStep | None = None
     easiest: bool = False  # True: pick the easiest problem (stuck, nothing to step back to)
 
@@ -162,11 +178,7 @@ def next_problems(
             f"not '{course.id}'."
         )
     # Look-up table: (problem id, step position) -> the skill of that step.
-    skill_of_step = {
-        (problem.id, position): step.skill
-        for problem in course.problems
-        for position, step in enumerate(problem.steps, start=1)
-    }
+    skill_of_step = {place: step.skill for place, step in step_table(course).items()}
     # Keep only this student's answers to steps of this course.
     history = [
         answer
@@ -237,7 +249,7 @@ def next_problems(
             break  # every problem is already in the batch
         different = [option for option in options if option[0].skill != picks[-1].target_skill]
         target, problem = (different or options)[0]
-        picks.append(_make_pick(target, problem))
+        picks.append(_make_pick(target, problem))  # any_skill targets say "relaxed"
     return picks
 
 
@@ -275,6 +287,7 @@ def _make_pick(target: _Target, problem: Problem) -> Pick:
         reason=target.reason,
         is_follow_up=target.missed_step is not None,
         target_skill=target.skill,
+        rule=target.rule,
         missed_step=target.missed_step,
     )
 
@@ -320,6 +333,7 @@ def _starting_check(course: Course, count: int) -> list[Pick]:
                 ),
                 is_follow_up=False,
                 target_skill=target,
+                rule="starting_check",
             )
         )
     return picks
@@ -349,9 +363,6 @@ class _Selector:
         self.mastery = {
             skill.id: state.mastery.get(skill.id, START_MASTERY) for skill in course.skills
         }
-        self.mastered = {
-            skill.id: is_mastered(state, history, skill.id, course) for skill in course.skills
-        }
         self.prerequisites_of = {skill.id: skill.prerequisites for skill in course.skills}
         # Skills practiced by every problem: tracked, but never a reason to pick a problem.
         self.everywhere = _skills_in_every_problem(course)
@@ -363,6 +374,13 @@ class _Selector:
         self.tries_of: dict[str, list[StepAnswer]] = {skill.id: [] for skill in course.skills}
         for answer in self.first_tries:
             self.tries_of[self.skill_of(answer)].append(answer)
+        # The same test as mastery.is_mastered (a high number and a streak), worked out
+        # from the lists just built instead of searching the whole history per skill.
+        self.mastered = {
+            skill.id: self.mastery[skill.id] >= MASTERED
+            and has_mastery_streak(self.tries_of[skill.id])
+            for skill in course.skills
+        }
         # Problems answered (any step, any try) within the last REPEAT_HOURS hours.
         since = now - timedelta(hours=REPEAT_HOURS)
         self.recent = {answer.problem_id for answer in history if answer.answered_at > since}
@@ -389,7 +407,7 @@ class _Selector:
                 seen.add(self.skill_of(answer))
                 newest.append(answer)
         # A right first try with no hint ends the follow-up for that skill.
-        open_tries = [answer for answer in newest if not _right(answer)]
+        open_tries = [answer for answer in newest if not counts_as_right(answer)]
         # A skill in every problem goes last, so its follow-up (on another skill) never
         # takes the place of that other skill's own follow-up. sorted() keeps newest first.
         open_tries = sorted(open_tries, key=lambda answer: self.skill_of(answer) in self.everywhere)
@@ -409,7 +427,7 @@ class _Selector:
         follow-ups already target."""
         missed = MissedStep(problem_id=answer.problem_id, step_position=answer.step_position)
         title = self.problem_by_id[answer.problem_id].title
-        what = "needed a hint on" if _right_after_hint(answer) else "missed"
+        what = "needed a hint on" if right_after_hint(answer) else "missed"
         where = (
             f"you {what} step {answer.step_position} of {title} "
             f"({_skill_name(self.course, missed_skill)})"
@@ -423,7 +441,7 @@ class _Selector:
                 return None
             other = others[0]
             name = _skill_name(self.course, missed_skill)
-            if _right_after_hint(answer):
+            if right_after_hint(answer):
                 practice = f"you needed a hint on {name}, so you'll practice it again here"
             else:
                 practice = f"you'll practice {name} again here"
@@ -433,6 +451,9 @@ class _Selector:
                     f"Picked for you: {practice}, and this problem also works on "
                     f"{_skill_name(self.course, other.skill)}."
                 ),
+                # The other skill's own rule may be the stuck rule; then that is what
+                # chose the problem.
+                rule="stuck" if other.rule == "stuck" else "follow_up",
                 missed_step=missed,
                 easiest=other.easiest,
             )
@@ -441,6 +462,7 @@ class _Selector:
             return _Target(
                 skill=stuck.skill,
                 reason=f"Picked for you: {where}. {stuck.reason}",
+                rule="stuck",
                 missed_step=missed,
                 easiest=stuck.easiest,
             )
@@ -470,7 +492,7 @@ class _Selector:
                 f"Picked for you: {where}, which builds on "
                 f"{_skill_name(self.course, target)}, so this problem practices that first."
             )
-        return _Target(skill=target, reason=reason, missed_step=missed)
+        return _Target(skill=target, reason=reason, rule="follow_up", missed_step=missed)
 
     def _stuck_target(self, skill_id: str) -> _Target | None:
         """The stuck rule: what to practice instead of `skill_id`, or None if not stuck."""
@@ -491,10 +513,12 @@ class _Selector:
                     f"{name} has been hard for a while, so this problem practices "
                     f"{_skill_name(self.course, weakest)}, which it builds on."
                 ),
+                rule="stuck",
             )
         return _Target(
             skill=skill_id,
             reason=f"{name} has been hard for a while, so this is an easier problem on it.",
+            rule="stuck",
             easiest=True,
         )
 
@@ -518,6 +542,7 @@ class _Selector:
                     f"You are partway to mastering "
                     f"{_skill_name(self.course, skill_id)}, so this problem helps you finish it."
                 ),
+                rule="partway",
             )
             targets.append(self._stuck_target(skill_id) or plain)
         return targets
@@ -549,6 +574,7 @@ class _Selector:
                         f"Review: you mastered {_skill_name(self.course, skill_id)} {ago} ago; "
                         "a quick check keeps it fresh."
                     ),
+                    rule="review",
                 )
             )
         return targets
@@ -578,9 +604,9 @@ class _Selector:
         streak = 0
         for answer in self.tries_of[skill_id]:
             replay = update_mastery(replay, answer, self.course)
-            if _right_after_hint(answer):
+            if right_after_hint(answer):
                 continue  # skipped, as in is_mastered: neither builds nor breaks the streak
-            if not _right(answer):
+            if not counts_as_right(answer):
                 streak = 0
                 mastered_at = None
                 continue
@@ -603,6 +629,7 @@ class _Selector:
             _Target(
                 skill=skill.id,
                 reason=f"This problem starts you on {_skill_name(self.course, skill.id)}.",
+                rule="new_skill",
             )
             for skill in self.course.skills
             if not self.tries_of[skill.id]
@@ -624,7 +651,7 @@ class _Selector:
                 reason = f"More practice with {name}."
             else:
                 reason = f"This problem starts you on {name}."
-            targets.append(_Target(skill=skill_id, reason=reason))
+            targets.append(_Target(skill=skill_id, reason=reason, rule="relaxed"))
         return targets
 
     def success(self, problem: Problem) -> float:
@@ -683,16 +710,6 @@ class _Selector:
             problem.difficulty,
             same_type,
         )
-
-
-def _right(answer: StepAnswer) -> bool:
-    """A first try counts as right only if it was right without any hint."""
-    return answer.correct and answer.hints_used == 0
-
-
-def _right_after_hint(answer: StepAnswer) -> bool:
-    """True for a first try answered right, but after a hint (half credit, mastery.py)."""
-    return answer.correct and answer.hints_used > 0
 
 
 def _skills_in_every_problem(course: Course) -> set[str]:

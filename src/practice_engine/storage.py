@@ -7,9 +7,20 @@ nothing new needs installing. The file has three tables:
 - answers: every step answer, in the order it arrived. Rows are only ever added
   (and removed when a student is forgotten), never changed. Each row also keeps the
   course and the step's skill at the time it was saved, so a later edit to the
-  course file can be noticed. A `given` column can hold what the student typed or
-  picked, so T8 can see which wrong option was chosen; it may be left empty.
-- picks: every next problem the engine chose, with its reason (PRD decision 4).
+  course file can be noticed. A `given` column holds what the student typed or
+  picked, written as JSON text (a standard way to write values as text), so T8 can
+  see which wrong option was chosen and read it back exactly: typed text keeps its
+  quote marks, a number has none, and an order is a list in square brackets. It may
+  be left empty.
+- picks: every next problem the engine chose, with its reason (PRD decision 4) and
+  the rule that made it (see selection.py).
+
+The engine checks each answer itself. The page sends a right/wrong flag, but
+save_answer works it out again from what the student gave, with check_answer, and
+refuses the answer if the two disagree, so a page can never claim a wrong answer was
+right. When nothing was given, there is nothing to check: an answer marked right is
+then refused, and one marked wrong is saved (such as a step the student gave up on;
+marking it wrong can only lower their own mastery).
 
 Mastery is not stored. It is worked out again each time by replaying the saved
 answers through update_mastery, oldest first. That keeps the answers as the only
@@ -22,8 +33,8 @@ check_saved_answers lists them so the change can be looked at.
 The helpers:
 
 - open_storage(path): open the file, making it and its tables if needed.
-- save_answer(db, course, answer, given=None): save one step answer. True if it
-  was new, False if the same answer was already saved.
+- save_answer(db, course, answer, given=None): check and save one step answer.
+  True if it was new, False if the same answer was already saved.
 - load_history(db, course, nickname): the student's saved answers, oldest first.
 - load_mastery(db, course, nickname): the student's MasteryState, rebuilt.
 - check_saved_answers(db, course): plain complaints about saved answers that no
@@ -52,14 +63,19 @@ nickname containing quotes is stored as plain text and cannot change the query.
 Nothing here knows about algebra or physics.
 """
 
+import json
 import math
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from practice_engine.mastery import new_mastery_state, update_mastery
+from practice_engine.checking import check_answer
+from practice_engine.mastery import find_step, new_mastery_state, step_table, update_mastery
 from practice_engine.models import Course, MasteryState, StepAnswer
 from practice_engine.selection import MissedStep, Pick
+
+# What a student can give as an answer: text, a number, or a list of texts (an order).
+Given = str | int | float | list[str] | None
 
 # The tables. `seq` numbers each row in the order it was saved, so answers with the
 # same time come back in the order they arrived. UNIQUE says what makes an answer
@@ -95,6 +111,7 @@ CREATE TABLE IF NOT EXISTS picks (
     position INTEGER NOT NULL,
     problem_id TEXT NOT NULL,
     target_skill TEXT NOT NULL,
+    rule TEXT NOT NULL,  -- which rule made the pick, one of selection.PICK_RULES
     is_follow_up INTEGER NOT NULL,
     missed_problem_id TEXT,
     missed_step_position INTEGER,
@@ -127,31 +144,35 @@ def open_storage(path: str | Path) -> sqlite3.Connection:
 
 
 def save_answer(
-    db: sqlite3.Connection, course: Course, answer: StepAnswer, given: str | None = None
+    db: sqlite3.Connection, course: Course, answer: StepAnswer, given: Given = None
 ) -> bool:
-    """Save one step answer. True if it was new, False if it was already saved.
+    """Check and save one step answer. True if it was new, False if already saved.
 
-    `given` is what the student typed or picked, if known. Stops with a ValueError
-    if the answer's time has no time zone, if the course has no such problem or
-    step, or if an answer with the same identity (student, course, problem, step,
-    try and time) was already saved with different details.
+    `given` is what the student typed or picked. Stops with a ValueError if the
+    answer's time has no time zone, if the course has no such problem or step, if
+    the answer's right/wrong flag disagrees with checking `given` (see the top of
+    this file), if it is marked right but nothing was given, or if an answer with
+    the same identity (student, course, problem, step, try and time) was already
+    saved with different details.
     """
     answered_at = _to_text(answer.answered_at)
     if not math.isfinite(answer.seconds):
         raise ValueError(f"The answer's seconds ({answer.seconds}) is not a usable number.")
-    skill_id = _skill_of(course, answer.problem_id, answer.step_position)
+    step = find_step(course, answer.problem_id, answer.step_position)
+    step_right = None if given is None else check_answer(step, given)
+    _check_flag(answer, step_right, given)
     row = (
         answer.nickname,
         course.id,
         answer.problem_id,
         answer.step_position,
-        skill_id,
+        step.skill,
         int(answer.correct),
         answer.seconds,
         answer.hints_used,
         answer.attempt,
         answered_at,
-        given,
+        None if given is None else json.dumps(given),
     )
     with db:  # one transaction: both rows are saved, or neither
         db.execute(_ADD_STUDENT, (answer.nickname, course.id, answered_at))
@@ -188,6 +209,23 @@ def save_answer(
     return False
 
 
+def _check_flag(answer: StepAnswer, step_right: bool | None, given: Given) -> None:
+    """Refuse an answer whose right/wrong flag the engine cannot confirm.
+
+    `step_right` is what check_answer said about `given`, or None if nothing was given.
+    """
+    where = f"Step {answer.step_position} of '{answer.problem_id}'"
+    if step_right is None:
+        if answer.correct:
+            raise ValueError(
+                f"{where} is marked right, but nothing was given, so it cannot be checked."
+            )
+        return  # marked wrong with nothing given: nothing to check
+    if step_right != answer.correct:
+        said, really = ("right", "wrong") if answer.correct else ("wrong", "right")
+        raise ValueError(f"{where} is marked {said}, but {given!r} is {really}.")
+
+
 def load_history(db: sqlite3.Connection, course: Course, nickname: str) -> list[StepAnswer]:
     """The student's saved answers in this course, oldest first.
 
@@ -204,11 +242,7 @@ def load_mastery(db: sqlite3.Connection, course: Course, nickname: str) -> Maste
     was saved, is skipped, so it is never counted toward the wrong skill (see
     check_saved_answers to list them).
     """
-    skill_now = {
-        (problem.id, position): step.skill
-        for problem in course.problems
-        for position, step in enumerate(problem.steps, start=1)
-    }
+    skill_now = {place: step.skill for place, step in step_table(course).items()}
     state = new_mastery_state(course, nickname)
     for step_answer, saved_skill in _load_answers(db, course, nickname):
         if skill_now.get((step_answer.problem_id, step_answer.step_position)) == saved_skill:
@@ -234,7 +268,7 @@ def check_saved_answers(
     complaints = []
     for problem_id, step_position, saved_skill in rows:
         try:
-            skill_now = _skill_of(course, problem_id, step_position)
+            skill_now = find_step(course, problem_id, step_position).skill
         except ValueError:
             complaints.append(
                 f"Step {step_position} of '{problem_id}' was answered but is no longer "
@@ -266,6 +300,7 @@ def save_picks(
             position,
             pick.problem_id,
             pick.target_skill,
+            pick.rule,
             int(pick.is_follow_up),
             pick.missed_step.problem_id if pick.missed_step else None,
             pick.missed_step.step_position if pick.missed_step else None,
@@ -277,8 +312,8 @@ def save_picks(
         db.execute(_ADD_STUDENT, (nickname, course.id, created))
         db.executemany(
             "INSERT INTO picks (nickname, course_id, created_at, position, problem_id,"
-            " target_skill, is_follow_up, missed_problem_id, missed_step_position, reason)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " target_skill, rule, is_follow_up, missed_problem_id, missed_step_position,"
+            " reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
 
@@ -291,7 +326,7 @@ def load_picks(
     Each item is (when the batch was made, the pick).
     """
     rows = db.execute(
-        "SELECT created_at, problem_id, target_skill, is_follow_up, missed_problem_id,"
+        "SELECT created_at, problem_id, target_skill, rule, is_follow_up, missed_problem_id,"
         " missed_step_position, reason FROM picks"
         " WHERE nickname = ? AND course_id = ? ORDER BY created_at, seq",
         (nickname, course.id),
@@ -301,6 +336,7 @@ def load_picks(
         created,
         problem_id,
         target_skill,
+        rule,
         is_follow_up,
         missed_problem,
         missed_step,
@@ -314,6 +350,7 @@ def load_picks(
             reason=reason,
             is_follow_up=bool(is_follow_up),
             target_skill=target_skill,
+            rule=rule,
             missed_step=missed,
         )
         saved.append((_from_text(created), pick))
@@ -386,13 +423,3 @@ def _to_text(moment: datetime) -> str:
 def _from_text(text: str) -> datetime:
     """A time saved by _to_text, back as a time in UTC."""
     return datetime.fromisoformat(text)
-
-
-def _skill_of(course: Course, problem_id: str, step_position: int) -> str:
-    """The skill of a step. Stops with a ValueError if the course has no such step."""
-    for problem in course.problems:
-        if problem.id == problem_id:
-            if 1 <= step_position <= len(problem.steps):
-                return problem.steps[step_position - 1].skill
-            raise ValueError(f"Problem '{problem_id}' has no step {step_position}.")
-    raise ValueError(f"The course has no problem '{problem_id}'.")

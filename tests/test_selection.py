@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from practice_engine.mastery import MASTERED, START_MASTERY, new_mastery_state, update_mastery
 from practice_engine.models import (
@@ -26,9 +27,11 @@ from practice_engine.models import (
 )
 from practice_engine.selection import (
     MAX_BATCH_SKILLS,
+    PICK_RULES,
     READY_MASTERY,
     STUCK_STEPS,
     MissedStep,
+    Pick,
     next_problems,
 )
 
@@ -1266,3 +1269,124 @@ def test_a_hint_on_the_skill_in_every_problem_is_named_in_the_reason() -> None:
         "Picked for you: you needed a hint on Skill pick, so you'll practice it again "
         "here, and this problem also works on Skill a."
     )
+
+
+# Which rule made each pick (the `rule` field).
+
+
+def rules_of(picks: list) -> list[str]:
+    return [pick.rule for pick in picks]
+
+
+def test_the_rule_names_are_a_small_fixed_set() -> None:
+    assert PICK_RULES == (
+        "starting_check",
+        "follow_up",
+        "stuck",
+        "partway",
+        "review",
+        "new_skill",
+        "relaxed",
+    )
+
+
+def test_a_pick_with_an_unknown_rule_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        Pick(problem_id="p1", reason="A reason.", is_follow_up=False, target_skill="a", rule="x")
+
+
+def test_starting_check_picks_say_starting_check() -> None:
+    course = tiny_course({"a": [], "b": []}, [("pa", 1, ["a"]), ("pb", 1, ["b"])])
+
+    picks = next_problems(course, state({}), [], NOW)
+
+    assert rules_of(picks) == ["starting_check", "starting_check"]
+
+
+def test_a_follow_up_pick_says_follow_up() -> None:
+    course = tiny_course(
+        {"a": [], "b": []},
+        [("p_old", 1, ["a"]), ("p1", 1, ["a", "b"]), ("p2", 1, ["b"]), ("p3", 1, ["a"])],
+    )
+    history = [answer("p1", 1, True), answer("p1", 2, False)]
+
+    picks = next_problems(course, state({"a": 0.5, "b": 0.2}), history, NOW)
+
+    assert picks[0].rule == "follow_up"
+    assert "follow_up" not in rules_of(picks[1:])
+
+
+def test_a_stuck_follow_up_says_stuck_and_is_still_a_follow_up() -> None:
+    course = tiny_course(
+        {"a": [], "b": ["a"]},
+        [("pb1", 1, ["b"]), ("pb2", 1, ["b"]), ("pa", 1, ["a"])],
+    )
+    mastery = {"a": READY_MASTERY + 0.05, "b": 0.3}
+
+    picks = next_problems(course, state(mastery), misses("pb1", STUCK_STEPS), NOW, count=1)
+
+    assert picks[0].rule == "stuck"
+    assert picks[0].is_follow_up is True
+
+
+def test_a_stuck_partway_skill_says_stuck() -> None:
+    course = tiny_course({"a": [], "b": ["a"]}, [("pb", 1, ["b"]), ("pa", 1, ["a"])])
+    history = misses("pb", STUCK_STEPS - 1) + [
+        answer("pb", 1, True, LAST_WEEK + timedelta(hours=1))
+    ]
+    mastery = {"a": READY_MASTERY + 0.05, "b": 0.4}
+
+    picks = next_problems(course, state(mastery), history, NOW, count=1)
+
+    assert picks[0].rule == "stuck"
+    assert picks[0].is_follow_up is False
+
+
+def test_partway_and_new_skill_picks_say_so() -> None:
+    course = tiny_course({"a": [], "b": []}, [("pa", 1, ["a"]), ("pb", 1, ["b"])])
+    history = [answer("pa", 1, True, LAST_WEEK)]
+
+    picks = next_problems(course, state({"a": 0.6, "b": 0.1}), history, NOW)
+
+    assert skills_of(picks) == ["a", "b"]
+    assert rules_of(picks) == ["partway", "new_skill"]
+
+
+def test_a_review_pick_says_review() -> None:
+    course = tiny_course(REVIEW_COURSE, REVIEW_PROBLEMS)
+    history = streak("pa1", NOW - timedelta(days=1, hours=1))
+
+    picks = next_problems(course, state({"a": KNOWN, "b": 0.1}), history, NOW, count=1)
+
+    assert picks[0].rule == "review"
+
+
+def test_any_skill_picks_say_relaxed() -> None:
+    course = tiny_course({"a": [], "b": []}, [("pa", 1, ["a"]), ("pb", 1, ["b"])])
+    history = streak("pa", NOW - timedelta(hours=5)) + streak("pb", NOW - timedelta(hours=4))
+
+    picks = next_problems(course, state({"a": KNOWN, "b": KNOWN}), history, NOW, count=2)
+
+    assert rules_of(picks) == ["relaxed", "relaxed"]
+
+
+def test_a_skill_filling_a_second_place_says_relaxed() -> None:
+    # One skill only: after its follow-up, the batch is filled by the last loosening.
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"]), ("p3", 1, ["a"])])
+    history = [answer("p1", 1, False)]
+
+    picks = next_problems(course, state({"a": 0.3}), history, NOW)
+
+    assert ids(picks) == ["p2", "p3", "p1"]
+    assert rules_of(picks) == ["follow_up", "relaxed", "relaxed"]
+
+
+def test_a_follow_up_is_any_pick_with_a_missed_step() -> None:
+    course = tiny_course(
+        {"a": [], "b": []},
+        [("p_old", 1, ["a"]), ("p1", 1, ["a", "b"]), ("p2", 1, ["b"]), ("p3", 1, ["a"])],
+    )
+    history = [answer("p1", 1, True), answer("p1", 2, False)]
+
+    for pick in next_problems(course, state({"a": 0.5, "b": 0.2}), history, NOW):
+        assert pick.is_follow_up == (pick.missed_step is not None)

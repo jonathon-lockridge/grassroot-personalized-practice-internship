@@ -12,8 +12,13 @@ from practice_engine.mastery import (
     MASTERY_STREAK,
     START_MASTERY,
     chance_correct,
+    counts_as_right,
+    find_step,
+    has_mastery_streak,
     is_mastered,
     new_mastery_state,
+    right_after_hint,
+    step_table,
     update_mastery,
 )
 from practice_engine.models import Course, MasteryState, StepAnswer, load_course
@@ -435,3 +440,50 @@ def test_chance_correct_treats_a_missing_skill_as_new() -> None:
     # Same as the starting value: 0.1 x 0.85 + 0.9 x 0.25 = 0.31
     assert START_MASTERY == 0.1
     assert chance_correct(state, course.problems[0].steps[0]) == pytest.approx(0.31)
+
+
+# The shared helpers, used by selection.py and storage.py too.
+
+
+def test_counts_as_right_needs_a_right_answer_with_no_hint() -> None:
+    assert counts_as_right(answer(1, True)) is True
+    assert counts_as_right(answer(1, True, hints_used=1)) is False
+    assert counts_as_right(answer(1, False)) is False
+
+
+def test_right_after_hint_is_only_a_right_answer_with_a_hint() -> None:
+    assert right_after_hint(answer(1, True, hints_used=2)) is True
+    assert right_after_hint(answer(1, True)) is False
+    assert right_after_hint(answer(1, False, hints_used=1)) is False
+
+
+def test_find_step_gives_the_step_or_a_plain_error() -> None:
+    course = load_course(COURSE)
+
+    assert find_step(course, "push_cart", 2).skill == NUMBER_SKILL
+    with pytest.raises(ValueError, match="no step 9"):
+        find_step(course, "push_cart", 9)
+    with pytest.raises(ValueError, match="no problem 'gone'"):
+        find_step(course, "gone", 1)
+
+
+def test_step_table_has_every_step_by_problem_and_position() -> None:
+    course = load_course(COURSE)
+
+    table = step_table(course)
+
+    assert len(table) == sum(len(problem.steps) for problem in course.problems)
+    assert table[("push_cart", 1)].skill == CHOICE_SKILL
+    assert table[("push_cart", 2)] is find_step(course, "push_cart", 2)
+    assert ("push_cart", 0) not in table
+
+
+def test_has_mastery_streak_looks_at_the_newest_first_tries_only() -> None:
+    right = [answer(2, True, minute=i) for i in range(MASTERY_STREAK)]
+    hinted = answer(2, True, hints_used=1, minute=50)
+
+    assert has_mastery_streak(right) is True
+    assert has_mastery_streak(right[1:]) is False  # too few
+    assert has_mastery_streak([answer(2, False, minute=-1)] + right) is True  # old miss
+    assert has_mastery_streak(right + [answer(2, False, minute=60)]) is False  # new miss
+    assert has_mastery_streak(right + [hinted]) is True  # a hinted right one is skipped

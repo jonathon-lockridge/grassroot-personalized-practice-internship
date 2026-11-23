@@ -206,7 +206,13 @@ def test_the_random_order_draws_its_own_numbers_not_the_students(monkeypatch):
 
 def pick(problem_id: str, skill: str) -> Pick:
     """A hand-made pick, for checking the batch rules."""
-    return Pick(problem_id=problem_id, target_skill=skill, reason="A reason.", is_follow_up=False)
+    return Pick(
+        problem_id=problem_id,
+        target_skill=skill,
+        reason="A reason.",
+        is_follow_up=False,
+        rule="partway",
+    )
 
 
 def test_the_batch_checks_catch_each_broken_rule():
