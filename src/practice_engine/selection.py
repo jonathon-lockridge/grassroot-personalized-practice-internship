@@ -8,19 +8,22 @@ One main helper:
 
 Only a step's first try counts as evidence here, as in mastery.py: a second try says
 little about what the student knew (research report, change 1). A wrong first try
-after a hint is a miss. A right first try after a hint is only half a right answer
-(mastery.py), so these rules skip it: it is neither a miss nor a right answer here.
+after a hint is a miss. A right first try after a hint gets half credit in mastery.py,
+but here it brings the skill back like a miss (decided 2026-11-22): needing a hint
+shows the skill is still shaky.
 
 The rules, most important first:
 
 1. A new student (no answers yet) gets a short starting check: one problem per
    skill that needs nothing before it, then problems that cover more skills,
    easiest first.
-2. Follow-up: if the student missed a step and has not got that skill right since,
-   practice that skill again. If the skill builds on a skill that is not ready yet,
-   practice that earlier skill instead, and say so. If the missed step's skill is
-   in every problem (see "Throughout"), practice the skill rule 3 or 5 would pick
-   first instead, and say so.
+2. Follow-up: for each skill the student missed (or needed a hint on) and has not
+   got right since, practice that skill again, newest miss first. So a skill that
+   keeps being missed comes back in every batch. If the skill builds on a skill that
+   is not ready yet, practice that earlier skill instead, and say so. If the missed
+   step's skill is in every problem (see "Throughout"), practice the skill rule 3 or
+   5 would pick first instead, and say so; this comes after the other follow-ups, so
+   it never takes a skill that has a follow-up of its own.
    Stuck: if a skill has had many first tries and its number is still low, more of
    the same is not helping. Practice its weakest prerequisite that is not mastered
    instead, or, if there is none, the easiest problem for the skill (research
@@ -30,6 +33,14 @@ The rules, most important first:
 4. Review: a mastered skill comes back after 1 day, then 3, 7, 14 and 30 days; a
    miss starts the gaps over (research report, change 5).
 5. New skills: a skill never tried whose prerequisites are ready.
+
+Mixing, so a batch always moves forward (decided 2026-11-22):
+
+- Follow-ups never fill the whole batch. With 2 or more picks, at least one is not a
+  follow-up, preferring a new skill, then a review, then a partway skill. With 3 or
+  more picks, at most MAX_FOLLOW_UPS are follow-ups.
+- With 3 or more picks, one of them starts a new skill whenever one is ready, so new
+  ideas keep coming even while old ones are being fixed.
 
 Throughout:
 
@@ -98,6 +109,9 @@ REPEAT_HOURS = 24
 TARGET_SUCCESS = (0.70, 0.85)
 # A batch practices at most this many different skills.
 MAX_BATCH_SKILLS = 3
+# A batch of 3 or more has at most this many follow-ups, so there is room for
+# something new. (A batch of 2 has at most 1, and a batch of 1 is just the follow-up.)
+MAX_FOLLOW_UPS = 2
 
 
 class MissedStep(BaseModel):
@@ -173,28 +187,40 @@ def next_problems(
 
     selector = _Selector(course, state, history, now, skill_of_step)
     picks: list[Pick] = []
-    # Rules 2 to 5, most important first. Each skill gets its own loosening (any
-    # predicted success, then problems seen in the last 24 hours, both built into
-    # best_problem) before the next skill is tried, so a less important skill never
-    # pushes a more important one out.
-    targets = selector.follow_up() + selector.partway() + selector.reviews() + selector.new()
-    for target in targets:
-        if len(picks) >= count:
-            return picks
-        if not _skill_fits_batch(target.skill, picks):
-            continue
-        problem = selector.best_problem(target, picks)
-        if problem is not None:
-            picks.append(_make_pick(target, problem))
+    # Each skill gets its own loosening (any predicted success, then problems seen in
+    # the last 24 hours, both built into best_problem) before the next skill is tried,
+    # so a less important skill never pushes a more important one out.
+
+    # Rule 2: the follow-ups, but never the whole batch.
+    max_follow_ups = 1 if count <= 2 else MAX_FOLLOW_UPS
+    follow_ups = selector.follow_ups()
+    _add_picks(selector, picks, follow_ups, limit=min(count, max_follow_ups))
+
+    # The mixing place: one pick kept for a new skill (batches of 3 or more) or, after a
+    # follow-up, for any other skill (new, then review, then partway). It must not be a
+    # skill that is waiting for a follow-up itself.
+    partway, reviews, new = selector.partway(), selector.reviews(), selector.new()
+    waiting = {target.skill for target in follow_ups}
+    groups: list[list[_Target]] = []  # the candidates for the mixing place, best group first
+    if count >= 3 or (picks and count >= 2):
+        groups.append(new)
+    if picks and count >= 2:
+        groups.append([target for target in reviews if target.skill not in waiting])
+        groups.append([target for target in partway if target.skill not in waiting])
+    mixing = [target for group in groups for target in group]
+    # The place is for the best group that has any skill in it.
+    wanted = next(({target.skill for target in group} for group in groups if group), set())
+
+    # Rules 3 to 5, leaving the last place free for mixing if it is still needed.
+    places = min(count, MAX_BATCH_SKILLS)  # each pick here is for a skill of its own
+    rest = partway + reviews + new
+    if mixing:
+        _add_picks(selector, picks, rest, limit=places - 1)
+        if not any(not pick.is_follow_up and pick.target_skill in wanted for pick in picks):
+            _add_picks(selector, picks, mixing, limit=len(picks) + 1)
+    _add_picks(selector, picks, rest, limit=count)
     # The last loosening: any skill, still one pick per skill.
-    for target in selector.any_skill():
-        if len(picks) >= count:
-            return picks
-        if not _skill_fits_batch(target.skill, picks):
-            continue
-        problem = selector.best_problem(target, picks)
-        if problem is not None:
-            picks.append(_make_pick(target, problem))
+    _add_picks(selector, picks, selector.any_skill(), limit=count)
     # Still short (a course with few skills, or a large `count`): now a skill may fill
     # more than one place, as long as each problem appears only once and, when there
     # is a choice, two picks in a row practice different skills.
@@ -213,6 +239,26 @@ def next_problems(
         target, problem = (different or options)[0]
         picks.append(_make_pick(target, problem))
     return picks
+
+
+def _add_picks(
+    selector: "_Selector",
+    picks: list[Pick],
+    targets: list["_Target"],
+    limit: int,
+) -> None:
+    """Add a pick for each target in turn, until `picks` has `limit` picks. A target is
+    skipped when its skill is already in the batch, the batch has its MAX_BATCH_SKILLS
+    skills, or no problem fits.
+    """
+    for target in targets:
+        if len(picks) >= limit:
+            return
+        if not _skill_fits_batch(target.skill, picks):
+            continue
+        problem = selector.best_problem(target, picks)
+        if problem is not None:
+            picks.append(_make_pick(target, problem))
 
 
 def _skill_fits_batch(skill_id: str, picks: list[Pick]) -> bool:
@@ -333,37 +379,60 @@ class _Selector:
             return True
         return all(self.mastery[p] >= READY_MASTERY for p in self.prerequisites_of[skill_id])
 
-    def follow_up(self) -> list[_Target]:
-        """Rule 2: the most recent missed first try whose skill has not been right since."""
-        answered_right: set[str] = set()  # skills answered right after the miss
-        for answer in reversed(self.first_tries):  # newest first
-            skill = self.skill_of(answer)
-            if _right_after_hint(answer):
-                continue  # half credit: neither a miss nor a right answer here
-            if _right(answer):
-                answered_right.add(skill)
-            elif skill not in answered_right:
-                target = self._follow_up_target(answer, skill)
-                return [target] if target is not None else []
-        return []
+    def follow_ups(self) -> list[_Target]:
+        """Rule 2: one target per skill whose newest first try was missed or needed a
+        hint, newest first. A right first try with no hint ends that skill's follow-up."""
+        newest: list[StepAnswer] = []  # each skill's newest first try, newest first
+        seen: set[str] = set()  # skills already in `newest`
+        for answer in reversed(self.first_tries):
+            if self.skill_of(answer) not in seen:
+                seen.add(self.skill_of(answer))
+                newest.append(answer)
+        # A right first try with no hint ends the follow-up for that skill.
+        open_tries = [answer for answer in newest if not _right(answer)]
+        # A skill in every problem goes last, so its follow-up (on another skill) never
+        # takes the place of that other skill's own follow-up. sorted() keeps newest first.
+        open_tries = sorted(open_tries, key=lambda answer: self.skill_of(answer) in self.everywhere)
+        targets: list[_Target] = []
+        for answer in open_tries:
+            taken = {target.skill for target in targets}
+            target = self._follow_up_target(answer, self.skill_of(answer), taken)
+            # Two misses can lead to the same skill (say, a shared prerequisite): keep one.
+            if target is not None and target.skill not in taken:
+                targets.append(target)
+        return targets
 
-    def _follow_up_target(self, answer: StepAnswer, missed_skill: str) -> _Target | None:
+    def _follow_up_target(
+        self, answer: StepAnswer, missed_skill: str, taken: set[str]
+    ) -> _Target | None:
+        """The follow-up for one missed (or hinted) step. `taken` is the skills earlier
+        follow-ups already target."""
         missed = MissedStep(problem_id=answer.problem_id, step_position=answer.step_position)
         title = self.problem_by_id[answer.problem_id].title
+        what = "needed a hint on" if _right_after_hint(answer) else "missed"
         where = (
-            f"you missed step {answer.step_position} of {title} "
+            f"you {what} step {answer.step_position} of {title} "
             f"({_skill_name(self.course, missed_skill)})"
         )
         if missed_skill in self.everywhere:
             # Every problem practices this skill anyway, so work on another one: the
-            # first that rule 3 (weakest first) or rule 5 would pick.
-            others = self.partway() + self.new()
+            # first that rule 3 (weakest first) or rule 5 would pick and that no other
+            # follow-up has.
+            others = [t for t in self.partway() + self.new() if t.skill not in taken]
             if not others:
                 return None
             other = others[0]
+            name = _skill_name(self.course, missed_skill)
+            if _right_after_hint(answer):
+                practice = f"you needed a hint on {name}, so you'll practice it again here"
+            else:
+                practice = f"you'll practice {name} again here"
             return _Target(
                 skill=other.skill,
-                reason=f"Picked for you: {where}, which every problem practices. {other.reason}",
+                reason=(
+                    f"Picked for you: {practice}, and this problem also works on "
+                    f"{_skill_name(self.course, other.skill)}."
+                ),
                 missed_step=missed,
                 easiest=other.easiest,
             )

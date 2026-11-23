@@ -223,20 +223,30 @@ def test_a_wrong_first_try_after_a_hint_counts_as_missed() -> None:
     assert picks[0].is_follow_up is True
 
 
-def test_a_right_first_try_after_a_hint_is_neither_a_miss_nor_a_right_answer() -> None:
+def test_a_right_first_try_after_a_hint_brings_the_skill_back() -> None:
+    # Decided 2026-11-22: needing a hint shows the skill is shaky, so it gets a follow-up
+    # like a miss (mastery still gives it half credit).
+    course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"]), ("p3", 1, ["a"])])
+    history = [answer("p1", 1, True, hints_used=1)]
+
+    picks = next_problems(course, state({"a": 0.3}), history, NOW, count=1)
+
+    assert picks[0].is_follow_up is True
+    assert picks[0].missed_step == MissedStep(problem_id="p1", step_position=1)
+    assert picks[0].reason == (
+        "Picked for you: you needed a hint on step 1 of Problem p1 (Skill a), "
+        "so this problem practices that skill again."
+    )
+
+
+def test_a_right_first_try_with_no_hint_ends_the_hint_follow_up() -> None:
     course = tiny_course({"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"]), ("p3", 1, ["a"])])
     earlier = NOW - timedelta(hours=1)
-    # Alone, it starts no follow-up.
-    hinted_only = [answer("p1", 1, True, hints_used=1)]
-    # After a miss, it does not cancel that miss's follow-up either.
-    miss_then_hinted = [answer("p1", 1, False, earlier), answer("p2", 1, True, hints_used=1)]
+    history = [answer("p1", 1, True, earlier, hints_used=1), answer("p2", 1, True)]
 
-    alone = next_problems(course, state({"a": 0.3}), hinted_only, NOW, count=1)
-    after_miss = next_problems(course, state({"a": 0.3}), miss_then_hinted, NOW, count=1)
+    picks = next_problems(course, state({"a": 0.5}), history, NOW)
 
-    assert alone[0].is_follow_up is False
-    assert after_miss[0].is_follow_up is True
-    assert after_miss[0].missed_step == MissedStep(problem_id="p1", step_position=1)
+    assert not any(pick.is_follow_up for pick in picks)
 
 
 def test_a_right_second_try_does_not_cancel_the_follow_up() -> None:
@@ -574,20 +584,15 @@ def test_new_ready_skill_comes_after_reviews_and_unready_ones_wait() -> None:
 
 def test_follow_up_then_partway_then_review() -> None:
     course = tiny_course(
-        {"miss": [], "part": [], "rev": [], "new": []},
-        [
-            ("p_miss", 1, ["miss"]),
-            ("p_part", 2, ["part"]),
-            ("p_rev", 3, ["rev"]),
-            ("p_new", 1, ["new"]),
-        ],
+        {"miss": [], "part": [], "rev": []},
+        [("p_miss", 1, ["miss"]), ("p_part", 2, ["part"]), ("p_rev", 3, ["rev"])],
     )
     history = (
         streak("p_rev", LAST_WEEK)
         + [answer("p_part", 1, True, LAST_WEEK)]
         + [answer("p_miss", 1, False, LAST_WEEK + timedelta(hours=1))]
     )
-    mastery = {"miss": 0.35, "part": 0.5, "rev": KNOWN, "new": 0.1}
+    mastery = {"miss": 0.35, "part": 0.5, "rev": KNOWN}
 
     picks = next_problems(course, state(mastery), history, NOW)
 
@@ -843,10 +848,10 @@ def test_a_miss_on_the_skill_in_every_problem_follows_up_on_another_skill() -> N
     assert first.missed_step == MissedStep(problem_id="p1", step_position=1)
     # a is the weakest partway skill, so it is practiced instead, and the reason says so.
     assert first.target_skill == "a"
+    # One short sentence (decided 2026-11-22).
     assert first.reason == (
-        "Picked for you: you missed step 1 of Problem p1 (Skill pick), which every "
-        "problem practices. You are partway to mastering Skill a, so this problem helps "
-        "you finish it."
+        "Picked for you: you'll practice Skill pick again here, "
+        "and this problem also works on Skill a."
     )
     assert "pick" not in skills_of(picks)
 
@@ -1028,7 +1033,7 @@ def test_real_course_never_targets_choose_principle() -> None:
     assert first.is_follow_up is True
     assert first.missed_step == MissedStep(problem_id="bat_hits_ball", step_position=1)
     assert first.target_skill == "momentum_impulse"  # the one partway skill
-    assert "which every problem practices" in first.reason
+    assert first.reason.startswith("Picked for you: you'll practice Choose the principle")
     assert "choose_principle" not in skills_of(picks)
     # Nor in the starting check, nor when every problem was done today.
     everything = [answer(problem.id, 1, True) for problem in course.problems]
@@ -1072,3 +1077,192 @@ def test_real_course_reasons_never_show_ids() -> None:
     for student, history in scenarios:
         for pick in next_problems(course, student, history, NOW, count=3):
             assert not any(some_id in pick.reason for some_id in all_ids), pick.reason
+
+
+# Keep retesting, but always mix and move forward (decided 2026-11-22).
+
+# Skills for the mixing tests: "miss" was missed, "part" is partway, "rev" is due for
+# review, "new" was never tried. Each has two problems, so nothing runs out.
+MIXING_SKILLS = {"miss": [], "miss2": [], "miss3": [], "part": [], "rev": [], "new": []}
+
+
+def mixing_course(skills: list[str]) -> Course:
+    return tiny_course(
+        {skill: [] for skill in skills},
+        [(f"{skill}_{i}", 1, [skill]) for skill in skills for i in (1, 2)],
+    )
+
+
+def mixing_history(skills: list[str]) -> list[StepAnswer]:
+    """Last week: "rev" mastered, "part" tried once and right; then each missed skill
+    missed once ("miss" last, so newest)."""
+    history = []
+    if "rev" in skills:
+        history += streak("rev_1", LAST_WEEK)
+    if "part" in skills:
+        history.append(answer("part_1", 1, True, LAST_WEEK + timedelta(hours=1)))
+    for hours, skill in ((2, "miss3"), (3, "miss2"), (4, "miss")):
+        if skill in skills:
+            history.append(answer(f"{skill}_1", 1, False, LAST_WEEK + timedelta(hours=hours)))
+    return history
+
+
+MIXING_MASTERY = {"miss": 0.3, "miss2": 0.3, "miss3": 0.3, "part": 0.5, "rev": KNOWN, "new": 0.1}
+
+
+def mixing_picks(skills: list[str], count: int) -> list:
+    course = mixing_course(skills)
+    mastery = {skill: MIXING_MASTERY[skill] for skill in skills}
+    return next_problems(course, state(mastery), mixing_history(skills), NOW, count=count)
+
+
+def test_a_skill_that_keeps_being_missed_comes_back_in_every_batch() -> None:
+    course = mixing_course(["miss", "part", "new"])
+    mastery = {"miss": 0.3, "part": 0.5, "new": 0.1}
+    history = mixing_history(["miss", "part"])
+    # Three rounds: each time the student misses the follow-up's step again.
+    for round_number in range(3):
+        now = NOW + timedelta(days=round_number)
+        picks = next_problems(course, state(mastery), history, now)
+        follow_ups = [pick for pick in picks if pick.is_follow_up]
+        assert [pick.target_skill for pick in follow_ups] == ["miss"], round_number
+        history = history + [answer(follow_ups[0].problem_id, 1, False, now)]
+
+
+def test_two_skills_missed_both_get_a_follow_up() -> None:
+    picks = mixing_picks(["miss", "miss2", "part"], count=3)
+
+    follow_ups = [pick.target_skill for pick in picks if pick.is_follow_up]
+    assert follow_ups == ["miss", "miss2"]  # the newest miss first
+
+
+def test_follow_ups_never_take_the_whole_batch_of_two() -> None:
+    # The other pick prefers a new skill, then a review, then a partway skill.
+    with_new = mixing_picks(["miss", "miss2", "part", "rev", "new"], count=2)
+    with_review = mixing_picks(["miss", "miss2", "part", "rev"], count=2)
+    partway_only = mixing_picks(["miss", "miss2", "part"], count=2)
+
+    for picks, other in ((with_new, "new"), (with_review, "rev"), (partway_only, "part")):
+        assert [pick.is_follow_up for pick in picks] == [True, False]
+        assert skills_of(picks) == ["miss", other]
+
+
+def test_at_most_two_follow_ups_in_a_batch_of_three_or_more() -> None:
+    for count in (3, 4):
+        picks = mixing_picks(["miss", "miss2", "miss3", "part"], count=count)
+
+        assert sum(pick.is_follow_up for pick in picks) == 2
+        assert len(picks) == count
+        targets = skills_of(picks)
+        assert all(first != second for first, second in zip(targets, targets[1:], strict=False))
+
+
+def test_a_batch_of_three_brings_in_a_new_skill_when_one_is_ready() -> None:
+    # With follow-ups: two follow-ups and the new skill.
+    with_follow_ups = mixing_picks(["miss", "miss2", "part", "rev", "new"], count=3)
+    # Without: partway and review would fill the batch, but one place goes to the new skill.
+    skills = ["part", "rev", "new", "miss2"]
+    course = mixing_course(skills)
+    history = streak("rev_1", LAST_WEEK) + [
+        answer("part_1", 1, True, LAST_WEEK + timedelta(hours=1)),
+        answer("miss2_1", 1, True, LAST_WEEK + timedelta(hours=2)),
+    ]
+    mastery = {"part": 0.5, "rev": KNOWN, "new": 0.1, "miss2": 0.4}
+    no_follow_ups = next_problems(course, state(mastery), history, NOW)
+
+    assert skills_of(with_follow_ups) == ["miss", "miss2", "new"]
+    assert "new" in skills_of(no_follow_ups)
+    assert not any(pick.is_follow_up for pick in no_follow_ups)
+    assert len(no_follow_ups) == 3
+
+
+def test_new_skills_keep_coming_batch_after_batch() -> None:
+    # A student who keeps missing one skill still meets a new skill in every batch of
+    # three while new ready skills are left.
+    skills = ["miss", "n1", "n2", "n3"]
+    course = mixing_course(skills)
+    mastery = {"miss": 0.3, "n1": 0.1, "n2": 0.1, "n3": 0.1}
+    history = [answer("miss_1", 1, False, LAST_WEEK)]
+    met: list[str] = []  # the new skills met so far, in order
+    for round_number in range(3):
+        now = NOW + timedelta(days=round_number)
+        picks = next_problems(course, state(mastery), history, now)
+        new_here = [
+            pick.target_skill
+            for pick in picks
+            if pick.target_skill.startswith("n") and pick.target_skill not in met
+        ]
+        assert new_here, round_number
+        assert picks[0].is_follow_up and picks[0].target_skill == "miss"
+        met.append(new_here[0])
+        # The student tries the new skill (right) and misses the follow-up again.
+        new_pick = next(pick for pick in picks if pick.target_skill == new_here[0])
+        history = history + [
+            answer(new_pick.problem_id, 1, True, now),
+            answer(picks[0].problem_id, 1, False, now + timedelta(minutes=1)),
+        ]
+    assert met == ["n1", "n2", "n3"]
+
+
+def test_with_no_new_skill_a_batch_of_three_still_brings_in_a_due_review() -> None:
+    # One follow-up, two partway skills and a due review: the review gets a place,
+    # as it does in a batch of 2.
+    skills = ["miss", "part", "part2", "rev"]
+    course = mixing_course(skills)
+    history = streak("rev_1", LAST_WEEK) + [
+        answer("part_1", 1, True, LAST_WEEK + timedelta(hours=1)),
+        answer("part2_1", 1, True, LAST_WEEK + timedelta(hours=2)),
+        answer("miss_1", 1, False, LAST_WEEK + timedelta(hours=3)),
+    ]
+    mastery = {"miss": 0.3, "part": 0.5, "part2": 0.5, "rev": KNOWN}
+
+    picks = next_problems(course, state(mastery), history, NOW)
+
+    assert picks[0].is_follow_up and picks[0].target_skill == "miss"
+    assert "rev" in skills_of(picks)
+
+
+def test_a_course_of_only_missed_skills_still_mixes_and_is_never_empty() -> None:
+    picks = mixing_picks(["miss", "miss2"], count=3)
+
+    assert len(picks) == 3
+    targets = skills_of(picks)
+    assert all(first != second for first, second in zip(targets, targets[1:], strict=False))
+
+
+def test_a_miss_on_the_skill_in_every_problem_keeps_an_older_miss_its_own_follow_up() -> None:
+    course = tiny_course(EVERY_SKILLS, EVERY_PROBLEMS)
+    earlier = NOW - timedelta(hours=1)
+    # First: step 2 of p1 (a) missed. Then: step 1 of p2 (pick) missed, step 2 (b) right.
+    history = [
+        answer("p1", 1, True, earlier),
+        answer("p1", 2, False, earlier),
+        answer("p2", 1, False),
+        answer("p2", 2, True),
+    ]
+    mastery = {"pick": 0.3, "a": 0.2, "b": 0.4}
+
+    picks = next_problems(course, state(mastery), history, NOW)
+
+    follow_ups = {pick.target_skill: pick for pick in picks if pick.is_follow_up}
+    assert follow_ups["a"].missed_step == MissedStep(problem_id="p1", step_position=2)
+    assert follow_ups["a"].reason.startswith("Picked for you: you missed step 2 of Problem p1")
+    assert follow_ups["b"].missed_step == MissedStep(problem_id="p2", step_position=1)
+    assert follow_ups["b"].reason == (
+        "Picked for you: you'll practice Skill pick again here, "
+        "and this problem also works on Skill b."
+    )
+
+
+def test_a_hint_on_the_skill_in_every_problem_is_named_in_the_reason() -> None:
+    course = tiny_course(EVERY_SKILLS, EVERY_PROBLEMS)
+    history = [answer("p1", 1, True, hints_used=1), answer("p1", 2, True)]
+    mastery = {"pick": 0.3, "a": 0.4, "b": 0.1}
+
+    picks = next_problems(course, state(mastery), history, NOW)
+
+    assert picks[0].is_follow_up is True
+    assert picks[0].reason == (
+        "Picked for you: you needed a hint on Skill pick, so you'll practice it again "
+        "here, and this problem also works on Skill a."
+    )
