@@ -57,18 +57,25 @@ Throughout:
 - A skill is "ready" only when every skill it builds on is known well enough. A
   skill that is not ready is not picked by rules 3 and 5. A course with no
   prerequisites at all switches this off.
-- For each skill, prefer a problem the student should get about 70 to 85 percent of
-  steps right on, closest to the middle, then the lower difficulty (research report,
-  change 7). When no problem is inside that range (mostly for a new student), the
-  lower difficulty comes first, then the closest to the range (decided 2026-11-20):
-  the predicted share can make a hard problem full of guessable choice steps look
-  easier than an easy one.
+- Most left to learn: for each skill, prefer the problem with the most the student
+  probably still has to learn, the average over its steps of 1 minus the skill's
+  number (see left_to_learn), so fewer steps go on skills they already know (T6
+  tuning, 2026-11-22; the goal is learning per minute of practice). A problem padded
+  with steps on known skills wastes the student's time, even though those easy
+  steps raise its predicted share of steps right.
+- Then, among problems with the same left to learn, prefer one the student should
+  get about 70 to 85 percent of steps right on, closest to the middle, then the
+  lower difficulty (research report, change 7). When no problem is inside that range
+  (mostly for a new student), the lower difficulty comes first, then the closest to
+  the range (decided 2026-11-20): the predicted share can make a hard problem full
+  of guessable choice steps look easier than an easy one.
 - Unseen first: for each skill, a problem the student has never answered any step of
   beats one they have seen, even one inside the 70 to 85 percent range, because a
   seen problem's predicted share leaves out what the student remembers of it, and
   practice works best when the student must recall the skill, not an answer
-  (Stanford review, 2026-11-22). For a stuck skill's easiest problem, the lowest
-  difficulty still comes first and unseen only breaks ties.
+  (Stanford review, 2026-11-22). This comes before "most left to learn". For a stuck
+  skill's easiest problem, the lowest difficulty still comes first and unseen only
+  breaks ties; left to learn is not used there.
 - Each pick in a batch practices a different skill, up to three skills; two picks in
   a row never practice the same skill when the course allows. When problems are
   otherwise equal, prefer one whose first step has a different answer from the
@@ -742,12 +749,24 @@ class _Selector:
         chances = [chance_correct(self.state, step) for step in problem.steps]
         return sum(chances) / len(chances)
 
+    def left_to_learn(self, problem: Problem) -> float:
+        """How much of the problem the student most likely still has to learn: for each
+        step, 1 minus the mastery of its skill, averaged over the steps. A skill in every
+        problem is left out (every problem has it, so it tells problems nothing apart),
+        unless the problem has nothing else."""
+        steps = [step for step in problem.steps if step.skill not in self.everywhere]
+        steps = steps or problem.steps
+        left = sum(1 - self.mastery[step.skill] for step in steps) / len(steps)
+        # Rounded, so two problems whose numbers differ only by computer rounding
+        # still count as a tie and the later items decide.
+        return round(left, 6)
+
     def best_problem(self, target: _Target, picks: list[Pick]) -> Problem | None:
         """The best problem with a step on the target skill not already in `picks`, or None.
 
-        The loosening order is built into the comparison (see _fit): a problem inside
-        TARGET_SUCCESS beats one outside it, any problem never seen beats one seen
-        before, and any problem not answered in the last 24 hours beats one that was.
+        The loosening order is built into the comparison (see _fit): any problem not
+        answered in the last 24 hours beats one that was, any problem never seen beats
+        one seen before, and then the most left to learn wins, before TARGET_SUCCESS.
         For a stuck target with nothing to step back to (`easiest`), the success target
         is not used: the lowest difficulty wins, then an unseen problem.
         """
@@ -781,14 +800,18 @@ class _Selector:
            before the success target, because the predicted share of a seen problem
            leaves out what the student remembers of it, so "inside the target" is not
            trustworthy there;
-        3. inside TARGET_SUCCESS first;
-        4. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
+        3. the most left to learn (see left_to_learn): fewer steps on skills the
+           student already knows. For steps that type in a number, more left to
+           learn always means a lower predicted share, so items 4 to 6 mostly decide
+           between problems that differ in their choice or order steps;
+        4. inside TARGET_SUCCESS first;
+        5. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
            predicted share is a weak guide there (a hard problem with many guessable
            choice steps can look easier than an easy one);
-        5. closest to the middle of the target;
-        6. the lower difficulty;
-        7. mixing: a first step whose answer differs from the previous problem's;
-        8. mixing topics: a problem whose skills share no family with the previous
+        6. closest to the middle of the target;
+        7. the lower difficulty;
+        8. mixing: a first step whose answer differs from the previous problem's;
+        9. mixing topics: a problem whose skills share no family with the previous
            problem's (see skill_families).
         """
         low, high = TARGET_SUCCESS
@@ -804,6 +827,7 @@ class _Selector:
         return (
             problem.id in self.recent,
             problem.id in self.seen,
+            -self.left_to_learn(problem),  # the minus sign: more left to learn first
             outside,
             difficulty_if_outside,
             distance,

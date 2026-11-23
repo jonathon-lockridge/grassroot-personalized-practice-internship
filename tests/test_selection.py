@@ -647,20 +647,24 @@ A_TRIED = [answer("p_a", 1, True, LAST_WEEK)]
 
 
 def test_prefers_predicted_success_closest_to_the_middle_of_the_target() -> None:
+    # Every step is on a, at 0.9, so all three problems have the same left to learn
+    # (0.1 a step) and the success target decides. A number step is 0.785 and a
+    # 2-option choice step 0.795, so only how many steps are choices differs.
     course = tiny_course(
-        SUCCESS_SKILLS,
+        {"a": [], "other": []},
         [
-            ("p_a", 1, ["a"]),  # 0.59: below the target
-            ("p_a_lo", 1, ["a", "lo"]),  # 0.40: below
-            ("p_a_hi", 1, ["a", "hi"]),  # 0.72: inside
-            ("p_a_hi_hi", 1, ["a", "hi", "hi"]),  # 0.76: inside, closest to 0.775
+            ("choice_only", 1, ["a"], "X"),  # 0.795: inside, 0.02 from the middle
+            ("choice_then_number", 1, ["a", "a"], "X"),  # 0.79: inside, 0.015 away
+            ("number_only", 1, ["a"]),  # 0.785: inside, closest to 0.775
+            ("p_a_old", 1, ["a"]),  # where a was tried, so the three above are unseen
             OTHER_PROBLEM,
         ],
     )
+    history = [answer("p_a_old", 1, True, LAST_WEEK)]
 
-    picks = next_problems(course, state(SUCCESS_MASTERY), A_TRIED, NOW, count=1)
+    picks = next_problems(course, state({"a": 0.9, "other": 0.1}), history, NOW, count=1)
 
-    assert ids(picks) == ["p_a_hi_hi"]
+    assert ids(picks) == ["number_only"]
 
 
 def test_difficulty_breaks_a_tie_in_predicted_success() -> None:
@@ -688,15 +692,22 @@ def test_when_nothing_is_inside_the_target_the_lower_difficulty_comes_first() ->
 
 def test_when_nothing_is_inside_the_target_and_difficulty_ties_the_closest_is_picked() -> None:
     course = tiny_course(
-        {"a": [], "lo": [], "other": []},
-        # 0.40 and 0.59; p_a_seen (0.59, harder) is the one the student answered.
-        [("p_a_lo", 2, ["a", "lo"]), ("p_a", 2, ["a"]), ("p_a_seen", 3, ["a"]), OTHER_PROBLEM],
+        {"a": [], "other": []},
+        # Both only practice a (the same left to learn): a number step is 0.59, a
+        # 2-option choice step 0.63, both below the target. p_a_seen is the one the
+        # student answered.
+        [
+            ("p_a_number", 2, ["a"]),
+            ("p_a_choice", 2, ["a"], "X"),
+            ("p_a_seen", 3, ["a"]),
+            OTHER_PROBLEM,
+        ],
     )
     history = [answer("p_a_seen", 1, True, LAST_WEEK)]
 
     picks = next_problems(course, state(SUCCESS_MASTERY), history, NOW, count=1)
 
-    assert ids(picks) == ["p_a"]
+    assert ids(picks) == ["p_a_choice"]
 
 
 def test_a_new_ish_student_gets_an_easy_problem_before_a_hard_choice_heavy_one() -> None:
@@ -775,14 +786,16 @@ MIX_SKILLS = {"p": [], "a": [], "hi": [], "other": []}
 MIX_MASTERY = {"p": 0.9, "a": 0.7, "hi": 1.0}
 
 
-def pick_after(previous_answer: str, problems: list[tuple]) -> str:
+def pick_after(
+    previous_answer: str, problems: list[tuple], mastery: dict[str, float] = MIX_MASTERY
+) -> str:
     """The first pick after the student did a problem whose first step's answer is
     `previous_answer`."""
     course = tiny_course(
         MIX_SKILLS, [("prev", 1, ["p", "a"], previous_answer), *problems, OTHER_PROBLEM]
     )
     history = [answer("prev", 2, True, LAST_WEEK)]  # step 2 is skill a
-    return next_problems(course, state(MIX_MASTERY), history, NOW, count=1)[0].problem_id
+    return next_problems(course, state(mastery), history, NOW, count=1)[0].problem_id
 
 
 def test_mixing_prefers_a_different_first_step_answer_when_otherwise_equal() -> None:
@@ -794,12 +807,16 @@ def test_mixing_prefers_a_different_first_step_answer_when_otherwise_equal() -> 
 
 
 def test_closeness_to_the_middle_comes_before_mixing() -> None:
+    # p and a both at 0.9 here, so both problems have the same left to learn (0.1 a
+    # step); a choice step is 0.795 and a number step 0.785.
     problems = [
-        ("x_close", 1, ["p", "a", "hi"], "X"),  # 0.77, closest to the middle
-        ("y_far", 1, ["p", "a"], "Y"),  # 0.73
+        ("x_close", 1, ["p", "a", "a", "a"], "X"),  # 0.7875, closest to the middle
+        ("y_far", 1, ["p", "a"], "Y"),  # 0.79
+        ("p_hi", 1, ["hi"]),  # no a step: only here so the course uses hi
     ]
 
-    assert pick_after("X", problems) == "x_close"  # even though it repeats the type
+    picked = pick_after("X", problems, {"p": 0.9, "a": 0.9, "hi": 1.0})
+    assert picked == "x_close"  # even though it repeats the type
 
 
 def test_two_picks_in_a_row_never_practice_the_same_skill_when_avoidable() -> None:
@@ -1539,7 +1556,8 @@ def test_a_watched_skill_still_leaves_room_for_a_new_skill() -> None:
 
 # Unseen first: a problem the student never answered beats one they have seen
 # (Stanford review, 2026-11-22). Uses the success-target course above: p_a is 0.59,
-# p_a_lo 0.40, p_a_hi 0.72 and p_a_hi_hi 0.76 (closest to the middle, 0.775).
+# p_a_lo 0.40, p_a_hi 0.72 and p_a_hi_hi 0.76 (closest to the middle, 0.775). Left to
+# learn, per step: p_a_lo 0.7, p_a 0.4, p_a_hi 0.2 and p_a_hi_hi about 0.13.
 
 UNSEEN_PROBLEMS = [
     ("p_a", 1, ["a"]),
@@ -1563,9 +1581,10 @@ def unseen_pick(seen: list[str]) -> str:
     return picks[0].problem_id
 
 
-def test_an_unseen_problem_inside_the_target_beats_a_seen_one_closer_to_the_middle() -> None:
-    assert unseen_pick([]) == "p_a_hi_hi"
-    assert unseen_pick(["p_a_hi_hi"]) == "p_a_hi"
+def test_an_unseen_problem_beats_a_seen_one_that_fits_better() -> None:
+    assert unseen_pick([]) == "p_a_lo"  # the most left to learn (p_a was seen)
+    assert unseen_pick(["p_a_lo"]) == "p_a_hi"
+    assert unseen_pick(["p_a_lo", "p_a_hi"]) == "p_a_hi_hi"
 
 
 def test_an_unseen_problem_outside_the_target_beats_a_seen_one_inside_it() -> None:
@@ -1574,18 +1593,24 @@ def test_an_unseen_problem_outside_the_target_beats_a_seen_one_inside_it() -> No
 
 
 def test_a_seen_problem_is_used_when_no_unseen_one_is_left() -> None:
-    # Every a problem was seen last week, so the success target decides again.
-    assert unseen_pick(["p_a_lo", "p_a_hi", "p_a_hi_hi"]) == "p_a_hi_hi"
+    # Every a problem was seen last week, so the later items decide again: the most
+    # left to learn.
+    assert unseen_pick(["p_a_lo", "p_a_hi", "p_a_hi_hi"]) == "p_a_lo"
 
 
 def test_answering_any_step_of_a_problem_makes_it_seen() -> None:
-    course = tiny_course(SUCCESS_SKILLS, UNSEEN_PROBLEMS)
-    # Step 2 of p_a_hi_hi is a hi step, not an a step: the problem is still seen.
-    history = A_TRIED + [answer("p_a_hi_hi", 2, True, LAST_WEEK + timedelta(minutes=1))]
+    course = tiny_course(
+        {"a": [], "hi": [], "other": []},
+        [("p_a", 1, ["a"]), ("p_a_hi", 1, ["a", "hi"]), ("p_a_hi_hi", 1, ["a", "hi", "hi"])]
+        + [OTHER_PROBLEM],
+    )
+    # Step 2 of p_a_hi is a hi step, not an a step: the problem is still seen. Unseen,
+    # it would win (more left to learn than p_a_hi_hi).
+    history = A_TRIED + [answer("p_a_hi", 2, True, LAST_WEEK + timedelta(minutes=1))]
 
-    picks = next_problems(course, state(SUCCESS_MASTERY), history, NOW, count=1)
+    picks = next_problems(course, state({"a": 0.6, "hi": 1.0}), history, NOW, count=1)
 
-    assert ids(picks) == ["p_a_hi"]
+    assert ids(picks) == ["p_a_hi_hi"]
 
 
 def test_stuck_prefers_an_unseen_problem_among_the_easiest() -> None:
@@ -1696,3 +1721,81 @@ def test_between_equal_problems_one_from_another_family_comes_first() -> None:
 
     assert picks[0].target_skill == "t"
     assert ids(picks) == ["ty"]
+
+
+# Most left to learn: among problems for a skill, prefer the one whose steps the
+# student most likely still has to learn (T6 tuning, 2026-11-22). It comes after
+# "not in the last 24 hours" and "unseen", and before the success target.
+# Uses the success-target course above: a is at 0.6 (0.4 left to learn), hi at 1.0
+# (nothing left), lo at 0 (all of it left).
+
+
+def test_a_problem_with_more_left_to_learn_beats_one_inside_the_target() -> None:
+    course = tiny_course(
+        SUCCESS_SKILLS,
+        [
+            ("p_a", 1, ["a"]),  # 0.59, below the target; 0.4 left to learn per step
+            ("p_a_hi_hi", 1, ["a", "hi", "hi"]),  # 0.76, inside; about 0.13 left per step
+            ("p_lo", 1, ["lo"]),  # no a step: only here so the course uses lo
+            ("p_a_old", 1, ["a"]),  # where a was tried, so both problems above are unseen
+            OTHER_PROBLEM,
+        ],
+    )
+    history = [answer("p_a_old", 1, True, LAST_WEEK)]
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), history, NOW, count=1)
+
+    # p_a_hi_hi would spend two of its three steps on a skill already known.
+    assert ids(picks) == ["p_a"]
+
+
+def test_more_left_to_learn_does_not_beat_an_unseen_problem() -> None:
+    course = tiny_course(
+        SUCCESS_SKILLS,
+        [("p_a_lo", 1, ["a", "lo"]), ("p_a_hi", 1, ["a", "hi"]), OTHER_PROBLEM],
+    )
+    # p_a_lo has more left to learn, but the student has seen it.
+    history = A_TRIED + [answer("p_a_lo", 1, True, LAST_WEEK + timedelta(minutes=1))]
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), history, NOW, count=1)
+
+    assert ids(picks) == ["p_a_hi"]
+
+
+def test_more_left_to_learn_does_not_beat_the_24_hour_rule() -> None:
+    course = tiny_course(
+        SUCCESS_SKILLS,
+        [("p_a_lo", 1, ["a", "lo"]), ("p_a_hi", 1, ["a", "hi"]), OTHER_PROBLEM],
+    )
+    # Both were seen; p_a_lo has more left to learn but was answered an hour ago.
+    history = A_TRIED + [
+        answer("p_a_hi", 1, True, LAST_WEEK + timedelta(minutes=1)),
+        answer("p_a_lo", 1, True, NOW - timedelta(hours=1)),
+    ]
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), history, NOW, count=1)
+
+    assert ids(picks) == ["p_a_hi"]
+
+
+def test_left_to_learn_leaves_out_a_skill_in_every_problem() -> None:
+    # c is in every problem and still at 0, so counting it would favour the problem
+    # with the most c steps. Leaving it out, both problems have the same left to
+    # learn (a at 0.4 and hi at 0 per step), and the success target decides:
+    # p_short (0.55) is closer to it than p_many_c (0.41).
+    course = tiny_course(
+        {"a": [], "hi": [], "c": [], "other": []},
+        [
+            ("p_short", 1, ["c", "a", "hi"]),
+            ("p_many_c", 1, ["c", "c", "c", "a", "hi"]),
+            ("p_old", 1, ["c", "a"]),
+            ("p_other", 1, ["c", "other"]),
+        ],
+    )
+    history = [answer("p_old", 2, True, LAST_WEEK)]  # a tried once, in a seen problem
+
+    picks = next_problems(
+        course, state({"a": 0.6, "hi": 1.0, "c": 0.0, "other": 0.6}), history, NOW, count=1
+    )
+
+    assert ids(picks) == ["p_short"]
