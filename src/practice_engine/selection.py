@@ -19,9 +19,12 @@ The rules, most important first:
 1. A new student (no answers yet) gets a short starting check: one problem per
    skill that needs nothing before it, then problems that cover more skills,
    easiest first. (rule "starting_check")
-2. Follow-up: for each skill the student missed (or needed a hint on) and has not
-   got right since, practice that skill again, newest miss first. So a skill that
-   keeps being missed comes back in every batch. If the skill builds on a skill that
+2. Follow-up: each skill the student missed (or needed a hint on) goes on a watch
+   list, and is practiced again in every batch, newest miss first, until it is right
+   on the first try, with no hint, in WATCH_CLEAR_RIGHTS (2) different problems after
+   the latest miss; a new miss starts that count over (Stanford review, 2026-11-22).
+   One right answer is weak evidence, as a choice step can be guessed. Two rights in
+   the same problem count once. If the skill builds on a skill that
    is not ready yet, practice that earlier skill instead, and say so. If the missed
    step's skill is in every problem (see "Throughout"), practice the skill rule 3 or
    5 would pick first instead, and say so; this comes after the other follow-ups, so
@@ -60,19 +63,33 @@ Throughout:
   lower difficulty comes first, then the closest to the range (decided 2026-11-20):
   the predicted share can make a hard problem full of guessable choice steps look
   easier than an easy one.
+- Unseen first: for each skill, a problem the student has never answered any step of
+  beats one they have seen, even one inside the 70 to 85 percent range, because a
+  seen problem's predicted share leaves out what the student remembers of it, and
+  practice works best when the student must recall the skill, not an answer
+  (Stanford review, 2026-11-22). For a stuck skill's easiest problem, the lowest
+  difficulty still comes first and unseen only breaks ties.
 - Each pick in a batch practices a different skill, up to three skills; two picks in
   a row never practice the same skill when the course allows. When problems are
   otherwise equal, prefer one whose first step has a different answer from the
   previous problem's, so that problem types are mixed (research report, change 3).
+- Mixing topics, only ever as a tiebreak: when a rule ranks two skills the same (say,
+  two new skills, or two partway skills at the same number), or two problems fit
+  equally well, prefer the one that shares no "family" with the previous problem.
+  A skill's family is the skills with no prerequisites that it builds on (see
+  skill_families), so it comes from the prerequisites alone. A course with no
+  prerequisites has no families, and this does nothing (Rohrer and Taylor,
+  interleaving; Stanford review, 2026-11-22).
 - No problem the student answered any step of in the last 24 hours.
 
 When no problem fits a skill, the rules are loosened for that skill in this order:
-any predicted success, then problems seen in the last 24 hours. Only after every
+any predicted success, then problems seen before, then problems seen in the last 24
+hours. Only after every
 skill from rules 2 to 5 has been tried is the last rule loosened: any skill (rule
 "relaxed", also used when a skill fills a second place in the batch). Loosening
 inside one skill keeps that skill's rule. The list is never empty while the course
-has a problem with at least one step. No randomness: ties go to whichever skill or
-problem comes first in the course file.
+has a problem with at least one step. No randomness: remaining ties go to whichever
+skill or problem comes first in the course file.
 
 How to read this file: see the note at the top of models.py. Also,
 `key=lambda x: ...` tells sorted(), min() or max() what to compare each item by.
@@ -121,6 +138,11 @@ MAX_BATCH_SKILLS = 3
 # A batch of 3 or more has at most this many follow-ups, so there is room for
 # something new. (A batch of 2 has at most 1, and a batch of 1 is just the follow-up.)
 MAX_FOLLOW_UPS = 2
+# A skill missed (or needing a hint) stays on the watch list, and so keeps getting
+# follow-ups, until it is right on the first try, with no hint, in this many different
+# problems after the latest miss. One right answer is weak evidence: a choice step can
+# be guessed 20 to 30 percent of the time.
+WATCH_CLEAR_RIGHTS = 2
 
 # The rule that made a pick, one short fixed word each (see the list at the top).
 # `Literal` means a Pick may hold only one of these words; any other is refused.
@@ -154,6 +176,9 @@ class _Target(BaseModel):
     rule: Rule
     missed_step: MissedStep | None = None
     easiest: bool = False  # True: pick the easiest problem (stuck, nothing to step back to)
+    # What the rule sorted this target by. Targets with the same rank are tied, so the
+    # mixing tiebreak may choose between them. None: never tied with another target.
+    rank: tuple | None = None
 
 
 def next_problems(
@@ -262,15 +287,30 @@ def _add_picks(
     """Add a pick for each target in turn, until `picks` has `limit` picks. A target is
     skipped when its skill is already in the batch, the batch has its MAX_BATCH_SKILLS
     skills, or no problem fits.
+
+    Mixing topics, a tiebreak only: among the next target and any others its rule
+    ranked the same (see _Target.rank), one whose family the previous problem does
+    not share goes first.
     """
-    for target in targets:
-        if len(picks) >= limit:
-            return
-        if not _skill_fits_batch(target.skill, picks):
-            continue
-        problem = selector.best_problem(target, picks)
-        if problem is not None:
-            picks.append(_make_pick(target, problem))
+    waiting = list(targets)
+    while waiting and len(picks) < limit:
+        first = waiting[0]
+        tied = [first]
+        if first.rank is not None:
+            tied = [target for target in waiting if target.rank == first.rank]
+        previous = selector.previous_problem(picks)
+        # sorted() keeps the rule's own order among targets that share a family or not.
+        tied = sorted(tied, key=lambda target: selector.shares_family(target.skill, previous))
+        for target in tied:
+            # A target that cannot be picked now never can later in this batch (the
+            # batch only fills up), so it is dropped.
+            waiting.remove(target)
+            if not _skill_fits_batch(target.skill, picks):
+                continue
+            problem = selector.best_problem(target, picks)
+            if problem is not None:
+                picks.append(_make_pick(target, problem))
+                break  # the others stay waiting, to be compared with this new pick
 
 
 def _skill_fits_batch(skill_id: str, picks: list[Pick]) -> bool:
@@ -384,8 +424,26 @@ class _Selector:
         # Problems answered (any step, any try) within the last REPEAT_HOURS hours.
         since = now - timedelta(hours=REPEAT_HOURS)
         self.recent = {answer.problem_id for answer in history if answer.answered_at > since}
+        # Problems answered ever (any step, any try): "seen", for the unseen-first rule.
+        self.seen = {answer.problem_id for answer in history}
         # The problem answered last, for mixing problem types.
         self.last_problem = self.problem_by_id[history[-1].problem_id]
+        # Skill id -> its family, for mixing unrelated topics (see skill_families).
+        self.families = skill_families(course)
+        # Problem id -> every family its skills belong to, worked out once.
+        self.families_of_problem = {
+            problem.id: set().union(*(self.families[step.skill] for step in problem.steps))
+            for problem in course.problems
+        }
+
+    def previous_problem(self, picks: list[Pick]) -> Problem:
+        """The problem just before the next place: the batch's last pick, or else the
+        problem the student answered last."""
+        return self.problem_by_id[picks[-1].problem_id] if picks else self.last_problem
+
+    def shares_family(self, skill_id: str, problem: Problem) -> bool:
+        """True if the skill belongs to a family the problem's skills belong to."""
+        return bool(self.families[skill_id] & self.families_of_problem[problem.id])
 
     def skill_of(self, answer: StepAnswer) -> str:
         """The skill of the step `answer` is for."""
@@ -397,34 +455,47 @@ class _Selector:
             return True
         return all(self.mastery[p] >= READY_MASTERY for p in self.prerequisites_of[skill_id])
 
+    def watch_list(self) -> list[tuple[StepAnswer, int]]:
+        """The skills on the watch list, newest miss first: for each, its latest first
+        try that was missed or needed a hint, and in how many different problems it has
+        been right (first try, no hint) since. A skill leaves the list once that number
+        reaches WATCH_CLEAR_RIGHTS."""
+        watched = []
+        for skill in self.course.skills:
+            tries = self.tries_of[skill.id]
+            # The position of the latest miss (or hint) in this skill's first tries.
+            misses = [i for i, answer in enumerate(tries) if not counts_as_right(answer)]
+            if not misses:
+                continue
+            latest = misses[-1]
+            # Each problem counts once, however many of its steps were right.
+            right_in = {answer.problem_id for answer in tries[latest + 1 :]}
+            if len(right_in) < WATCH_CLEAR_RIGHTS:
+                watched.append((tries[latest], len(right_in)))
+        # Newest miss first. sorted() keeps course order for misses at the same time.
+        return sorted(watched, key=lambda item: item[0].answered_at, reverse=True)
+
     def follow_ups(self) -> list[_Target]:
-        """Rule 2: one target per skill whose newest first try was missed or needed a
-        hint, newest first. A right first try with no hint ends that skill's follow-up."""
-        newest: list[StepAnswer] = []  # each skill's newest first try, newest first
-        seen: set[str] = set()  # skills already in `newest`
-        for answer in reversed(self.first_tries):
-            if self.skill_of(answer) not in seen:
-                seen.add(self.skill_of(answer))
-                newest.append(answer)
-        # A right first try with no hint ends the follow-up for that skill.
-        open_tries = [answer for answer in newest if not counts_as_right(answer)]
+        """Rule 2: one target per skill on the watch list, newest miss first."""
+        watched = self.watch_list()
         # A skill in every problem goes last, so its follow-up (on another skill) never
         # takes the place of that other skill's own follow-up. sorted() keeps newest first.
-        open_tries = sorted(open_tries, key=lambda answer: self.skill_of(answer) in self.everywhere)
+        watched = sorted(watched, key=lambda item: self.skill_of(item[0]) in self.everywhere)
         targets: list[_Target] = []
-        for answer in open_tries:
+        for answer, rights_since in watched:
             taken = {target.skill for target in targets}
-            target = self._follow_up_target(answer, self.skill_of(answer), taken)
+            target = self._follow_up_target(answer, self.skill_of(answer), taken, rights_since)
             # Two misses can lead to the same skill (say, a shared prerequisite): keep one.
             if target is not None and target.skill not in taken:
                 targets.append(target)
         return targets
 
     def _follow_up_target(
-        self, answer: StepAnswer, missed_skill: str, taken: set[str]
+        self, answer: StepAnswer, missed_skill: str, taken: set[str], rights_since: int = 0
     ) -> _Target | None:
         """The follow-up for one missed (or hinted) step. `taken` is the skills earlier
-        follow-ups already target."""
+        follow-ups already target; `rights_since` is how many different problems the
+        skill has been right in since (see watch_list)."""
         missed = MissedStep(problem_id=answer.problem_id, step_position=answer.step_position)
         title = self.problem_by_id[answer.problem_id].title
         what = "needed a hint on" if right_after_hint(answer) else "missed"
@@ -485,7 +556,14 @@ class _Selector:
                 break
             target = weakest
             seen.add(target)
-        if target == missed_skill:
+        if target == missed_skill and rights_since:
+            # Tell the student why a skill they just got right is back.
+            once = "once" if rights_since == 1 else f"in {rights_since} problems"
+            reason = (
+                f"Picked for you: {where} and have got it right {once} since, "
+                "so this problem checks it again."
+            )
+        elif target == missed_skill:
             reason = f"Picked for you: {where}, so this problem practices that skill again."
         else:
             reason = (
@@ -544,7 +622,9 @@ class _Selector:
                 ),
                 rule="partway",
             )
-            targets.append(self._stuck_target(skill_id) or plain)
+            target = self._stuck_target(skill_id) or plain
+            target.rank = ("partway", self.mastery[skill_id])
+            targets.append(target)
         return targets
 
     def reviews(self) -> list[_Target]:
@@ -564,7 +644,7 @@ class _Selector:
         # Most overdue first; sorted() keeps course order among equal ones.
         due = sorted(due, key=lambda item: item[0], reverse=True)
         targets = []
-        for _overdue, skill_id, mastered_at in due:
+        for overdue, skill_id, mastered_at in due:
             days = (self.now.date() - mastered_at.date()).days
             ago = "1 day" if days == 1 else f"{days} days"
             targets.append(
@@ -575,6 +655,7 @@ class _Selector:
                         "a quick check keeps it fresh."
                     ),
                     rule="review",
+                    rank=("review", overdue),
                 )
             )
         return targets
@@ -630,6 +711,7 @@ class _Selector:
                 skill=skill.id,
                 reason=f"This problem starts you on {_skill_name(self.course, skill.id)}.",
                 rule="new_skill",
+                rank=("new_skill",),  # new ready skills are all equal: any may go first
             )
             for skill in self.course.skills
             if not self.tries_of[skill.id]
@@ -651,7 +733,8 @@ class _Selector:
                 reason = f"More practice with {name}."
             else:
                 reason = f"This problem starts you on {name}."
-            targets.append(_Target(skill=skill_id, reason=reason, rule="relaxed"))
+            rank = ("relaxed", not self.is_ready(skill_id), self.mastery[skill_id])
+            targets.append(_Target(skill=skill_id, reason=reason, rule="relaxed", rank=rank))
         return targets
 
     def success(self, problem: Problem) -> float:
@@ -663,9 +746,10 @@ class _Selector:
         """The best problem with a step on the target skill not already in `picks`, or None.
 
         The loosening order is built into the comparison (see _fit): a problem inside
-        TARGET_SUCCESS beats one outside it, and any problem not answered in the last
-        24 hours beats one that was. For a stuck target with nothing to step back to
-        (`easiest`), the success target is not used: the lowest difficulty wins.
+        TARGET_SUCCESS beats one outside it, any problem never seen beats one seen
+        before, and any problem not answered in the last 24 hours beats one that was.
+        For a stuck target with nothing to step back to (`easiest`), the success target
+        is not used: the lowest difficulty wins, then an unseen problem.
         """
         candidates = [
             problem
@@ -675,10 +759,15 @@ class _Selector:
         ]
         if not candidates:
             return None
-        previous = self.problem_by_id[picks[-1].problem_id] if picks else self.last_problem
+        previous = self.previous_problem(picks)
         if target.easiest:
             return min(
-                candidates, key=lambda problem: (problem.id in self.recent, problem.difficulty)
+                candidates,
+                key=lambda problem: (
+                    problem.id in self.recent,
+                    problem.difficulty,
+                    problem.id in self.seen,
+                ),
             )
         # min() keeps the first of equal problems, so course order breaks ties.
         return min(candidates, key=lambda problem: self._fit(problem, previous))
@@ -687,13 +776,20 @@ class _Selector:
         """How well a problem fits; smaller is better. Compared item by item:
 
         1. not answered in the last 24 hours first;
-        2. inside TARGET_SUCCESS first;
-        3. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
+        2. never seen (no step of it ever answered) first: practice on a new problem
+           makes the student recall the skill, not the answer they remember. This comes
+           before the success target, because the predicted share of a seen problem
+           leaves out what the student remembers of it, so "inside the target" is not
+           trustworthy there;
+        3. inside TARGET_SUCCESS first;
+        4. only for a problem outside TARGET_SUCCESS: the lower difficulty, since the
            predicted share is a weak guide there (a hard problem with many guessable
            choice steps can look easier than an easy one);
-        4. closest to the middle of the target;
-        5. the lower difficulty;
-        6. mixing: a first step whose answer differs from the previous problem's.
+        5. closest to the middle of the target;
+        6. the lower difficulty;
+        7. mixing: a first step whose answer differs from the previous problem's;
+        8. mixing topics: a problem whose skills share no family with the previous
+           problem's (see skill_families).
         """
         low, high = TARGET_SUCCESS
         success = self.success(problem)
@@ -702,13 +798,18 @@ class _Selector:
         difficulty_if_outside = problem.difficulty if outside else 0
         distance = abs(success - (low + high) / 2)
         same_type = problem.steps[0].answer == previous.steps[0].answer
+        same_family = bool(
+            self.families_of_problem[problem.id] & self.families_of_problem[previous.id]
+        )
         return (
             problem.id in self.recent,
+            problem.id in self.seen,
             outside,
             difficulty_if_outside,
             distance,
             problem.difficulty,
             same_type,
+            same_family,
         )
 
 
@@ -725,6 +826,37 @@ def _skills_in_every_problem(course: Course) -> set[str]:
     everywhere = set.intersection(*skill_sets)  # the skills found in every set
     all_used = set.union(*skill_sets)  # the skills found in any set
     return everywhere if everywhere != all_used else set()
+
+
+def skill_families(course: Course) -> dict[str, set[str]]:
+    """Skill id -> its family: the skills with no prerequisites that it builds on,
+    directly or through other skills (a skill with none is its own family).
+
+    Worked out from the prerequisites alone, so it knows nothing about the subject.
+    A skill in every problem belongs to no family and is no other skill's root (it is
+    practiced whatever is picked). Every family is empty when no skill lists any
+    prerequisite: then there is nothing to tell topics apart by, and the mixing
+    tiebreak does nothing.
+    """
+    if not any(skill.prerequisites for skill in course.skills):
+        return {skill.id: set() for skill in course.skills}
+    everywhere = _skills_in_every_problem(course)
+    prerequisites_of = {skill.id: skill.prerequisites for skill in course.skills}
+
+    def roots(skill_id: str, seen: set[str]) -> set[str]:
+        # `seen` stops a broken course with a loop of prerequisites from going round forever.
+        below = [p for p in prerequisites_of.get(skill_id, []) if p not in everywhere | seen]
+        if not below:
+            return {skill_id}
+        found: set[str] = set()
+        for p in below:
+            found |= roots(p, seen | {skill_id})
+        return found
+
+    return {
+        skill.id: set() if skill.id in everywhere else roots(skill.id, set())
+        for skill in course.skills
+    }
 
 
 def _skill_name(course: Course, skill_id: str) -> str:
