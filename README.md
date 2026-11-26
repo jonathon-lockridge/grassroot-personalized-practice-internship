@@ -139,3 +139,7 @@ Before each commit, with the `.venv` folder active (`source .venv/bin/activate`)
 ## Design decisions
 
 Every decision, with the strongest argument against it, is in [PRD.md](PRD.md).
+
+## License
+
+MIT, see [LICENSE](LICENSE). The physics problems were written for this project; topics and formulas follow the College Board's AP Physics C: Mechanics course (see [SOURCES.md](data/ap-physics-c-energy-momentum/SOURCES.md)).

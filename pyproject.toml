@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Grassroot Personalized Practice: step-by-step practice that adapts to the student."
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Jonathon Lockridge" }]
 keywords = ["adaptive learning", "knowledge tracing", "education", "physics", "practice"]
 dependencies = [
     "fastapi>=0.115",
