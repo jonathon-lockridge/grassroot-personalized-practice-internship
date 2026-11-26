@@ -14,7 +14,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from practice_engine.mastery import MASTERED, START_MASTERY, new_mastery_state, update_mastery
+from practice_engine.mastery import (
+    MASTERED,
+    START_MASTERY,
+    chance_correct,
+    new_mastery_state,
+    update_mastery,
+)
 from practice_engine.models import (
     Course,
     MasteryState,
@@ -32,6 +38,7 @@ from practice_engine.selection import (
     READY_MASTERY,
     STUCK_STEPS,
     SUCCESS_FLOOR,
+    TARGET_SUCCESS,
     WATCH_CLEAR_RIGHTS,
     WATCH_LATER_HOURS,
     MissedStep,
@@ -91,6 +98,13 @@ def tiny_course(skills: dict[str, list[str]], problems: list[tuple]) -> Course:
     )
     assert validate_course(course) == []  # make sure the test course itself is sound
     return course
+
+
+def predicted_share(course: Course, student: MasteryState, pick: Pick) -> float:
+    """The share of the pick's steps the student is predicted to get right first time."""
+    problem = next(p for p in course.problems if p.id == pick.problem_id)
+    chances = [chance_correct(student, step) for step in problem.steps]
+    return sum(chances) / len(chances)
 
 
 def state(mastery: dict[str, float], course_id: str = "tiny") -> MasteryState:
@@ -1902,7 +1916,8 @@ def test_a_right_answer_in_the_problem_of_the_miss_does_not_count_toward_clearin
 # learn, as long as the student should get at least SUCCESS_FLOOR of it right; a
 # "solid" one is predicted 70 to 85 percent right, closest to the middle. In a batch
 # of 2 or more, the first place is solid and the rest stretch; a batch of 1 is
-# stretch. Each pick says which it is, so the page can show it.
+# stretch. A pick says solid only if it is predicted at least 70 percent right, and
+# stretch otherwise. Each pick says which it is, so the page can show it.
 
 
 def test_every_pick_says_whether_it_is_solid_or_stretch() -> None:
@@ -1924,27 +1939,48 @@ def test_every_pick_says_whether_it_is_solid_or_stretch() -> None:
         when += timedelta(days=1)
 
 
-def test_starting_check_picks_are_solid() -> None:
+def test_starting_check_picks_predicted_below_the_target_say_stretch() -> None:
     course = load_course(COURSE)
+    student = new_mastery_state(course, "sam")
 
-    picks = next_problems(course, new_mastery_state(course, "sam"), [], NOW)
+    picks = next_problems(course, student, [], NOW)
 
-    # The starting check takes the easiest problems first.
-    assert {pick.challenge for pick in picks} == {"solid"}
+    # A new student is predicted to get about 30 percent of these right, so calling
+    # them solid would be false, even though they are the easiest problems.
+    assert all(predicted_share(course, student, pick) < TARGET_SUCCESS[0] for pick in picks)
+    assert {pick.challenge for pick in picks} == {"stretch"}
+
+
+def test_a_pick_says_solid_only_when_predicted_inside_the_target_or_easier() -> None:
+    course = load_course(COURSE)
+    student = new_mastery_state(course, "sam")
+    history: list[StepAnswer] = []
+    when = LAST_WEEK
+    solid = 0
+    for _ in range(30):
+        picks = next_problems(course, student, history, when)
+        for pick in picks:
+            share = predicted_share(course, student, pick)
+            assert (pick.challenge == "solid") <= (share >= TARGET_SUCCESS[0])
+            solid += pick.challenge == "solid"
+        # Answer every step of the first pick right, so the student grows stronger.
+        problem = next(p for p in course.problems if p.id == picks[0].problem_id)
+        for position in range(1, len(problem.steps) + 1):
+            step_answer = answer(problem.id, position, True, when)
+            history.append(step_answer)
+            student = update_mastery(student, step_answer, course)
+            when += timedelta(minutes=1)
+        when += timedelta(days=1)
+    assert solid > 0  # the label is still used once the student can do the problems
 
 
 def test_the_first_place_of_a_batch_is_solid_and_the_rest_stretch() -> None:
-    course = load_course(COURSE)
-    history = [
-        answer("bat_hits_ball", 1, True, LAST_WEEK),
-        answer("bat_hits_ball", 2, False, LAST_WEEK),
-    ]
-    student = new_mastery_state(course, "sam")
-    for step_answer in history:
-        student = update_mastery(student, step_answer, course)
+    # The first place finds p_a_hi, inside the target (see MISSED_A_COURSE below).
+    course = tiny_course(*MISSED_A_COURSE)
 
     for count in (2, 3):
-        picks = next_problems(course, student, history, NOW, count=count)
+        picks = next_problems(course, state(SUCCESS_MASTERY), MISSED_A, NOW, count=count)
+        assert len(picks) == count
         assert [pick.challenge for pick in picks] == ["solid"] + ["stretch"] * (count - 1)
 
 
@@ -1971,6 +2007,20 @@ def test_a_solid_place_takes_the_problem_inside_the_target() -> None:
     assert picks[0].is_follow_up is True
     assert picks[0].challenge == "solid"
     assert picks[0].problem_id == "p_a_hi"
+
+
+def test_a_solid_place_with_nothing_inside_the_target_says_stretch() -> None:
+    # Without p_a_hi, the follow-up's only problem is p_a, predicted 0.59 right: it
+    # fills the solid place, but it is not solid, so the pick says stretch.
+    skills, problems = MISSED_A_COURSE
+    kept = [problem for problem in problems if problem[0] != "p_a_hi"]
+    course = tiny_course(skills, [*kept, ("p_hi", 1, ["hi"])])  # "hi" still needs a step
+
+    picks = next_problems(course, state(SUCCESS_MASTERY), MISSED_A, NOW, count=2)
+
+    assert picks[0].is_follow_up is True
+    assert picks[0].problem_id == "p_a"
+    assert picks[0].challenge == "stretch"
 
 
 def test_a_batch_of_one_is_stretch() -> None:

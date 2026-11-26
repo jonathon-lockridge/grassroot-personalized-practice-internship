@@ -7,7 +7,7 @@ One main helper:
   sentence telling the student why it was picked, and `rule`: a short fixed word
   saying which rule below made the pick (one of PICK_RULES), for checking and
   counting the engine's choices, and `challenge`: "solid" or "stretch" (see "Solid
-  and stretch" below), so the page can show how hard a pick is meant to be.
+  and stretch" below), so the page can show how hard a pick is predicted to be.
 
 Only a step's first try counts as evidence here, as in mastery.py: a second try says
 little about what the student knew (research report, change 1). A wrong first try
@@ -75,10 +75,23 @@ Throughout:
   helps the skill stick and keeps the student going. Why the first place: it is the
   most important pick (often a follow-up after a miss, or a new skill), and the
   session starts with a success. The starting check and a stuck skill's easiest
-  problem are always solid, as they are chosen easiest first. (T6, seeds 1 and 7: the
-  same as all-stretch for students who need prerequisites first, within 0.01 of
-  known share; a rule-based split, solid for new skills and follow-ups, finished 3 to
-  5 fewer of those students, so it was dropped.)
+  problem also look for solid, as they are chosen easiest first. A pick says "solid"
+  only if the problem found is predicted at least 70 percent right; otherwise it says
+  "stretch", even in the first place (review board, 2026-11-26): the 24-hour, unseen
+  and floor rules come first, so often no problem inside the target is left, and a
+  new student's starting check is predicted about 30 percent right.
+  What it costs, against all-stretch: in 20 simulated students, the solid place picks
+  a different problem about 1 time in 8 (in the rest the two orders agree), and about
+  2 in 3 first places end up saying "solid". In T6 (seeds 1, 7 and 11), for
+  students who need prerequisites first, the same number finish and known share is
+  at most 0.01 lower, but the median steps to finish rise (418 to 444, 425 to 431,
+  386 to 388). BKT-like students are slower too: median steps 305 to 315, 279 to 299,
+  278 to 305, and known share at 200 steps falls by 0.01 to 0.02, so on seeds 1 and
+  11 it goes from level with or ahead of Expert to just behind it (0.82 and 0.83
+  against 0.84);
+  they still finish more often than Expert and Random (48 of 50 against 41 and 36 or
+  fewer). A rule-based split, solid for new skills and follow-ups, finished 3 to 5
+  fewer students who need prerequisites first, so it was dropped.
 - Most left to learn: for each skill, prefer the problem with the most the student
   probably still has to learn, the average over its steps of 1 minus the skill's
   number (see left_to_learn), so fewer steps go on skills they already know (T6
@@ -190,8 +203,9 @@ WATCH_LATER_HOURS = 12
 Rule = Literal["starting_check", "follow_up", "stuck", "partway", "review", "new_skill", "relaxed"]
 PICK_RULES: tuple[str, ...] = get_args(Rule)  # the same words, as a tuple, for counting
 
-# How hard a pick is meant to be (see "Solid and stretch" at the top): "solid" aims at
-# TARGET_SUCCESS, "stretch" at the most left to learn above SUCCESS_FLOOR.
+# How hard a pick is (see "Solid and stretch" at the top): "solid" aims at
+# TARGET_SUCCESS and says so only if it gets there; "stretch" aims at the most left to
+# learn above SUCCESS_FLOOR.
 Challenge = Literal["solid", "stretch"]
 CHALLENGES: tuple[str, ...] = get_args(Challenge)  # the same words, as a tuple
 
@@ -211,7 +225,7 @@ class Pick(BaseModel):
     is_follow_up: bool  # True when picked because of a specific missed step
     target_skill: str  # the id of the skill this pick is meant to practice
     rule: Rule  # which rule made this pick, one of PICK_RULES
-    challenge: Challenge  # "solid" or "stretch": how hard it is meant to be
+    challenge: Challenge  # "solid" (predicted at least 70% right) or "stretch"
     missed_step: MissedStep | None = None  # filled in only for a follow-up
 
 
@@ -267,7 +281,7 @@ def next_problems(
     # Oldest first. sorted() keeps answers with the same time in the order they were given.
     history = sorted(history, key=lambda answer: answer.answered_at)
     if not history:
-        return _starting_check(course, count)
+        return _starting_check(course, state, count)
 
     selector = _Selector(course, state, history, now, skill_of_step)
     picks: list[Pick] = []
@@ -322,7 +336,8 @@ def next_problems(
             break  # every problem is already in the batch
         different = [option for option in options if option[0].skill != picks[-1].target_skill]
         target, problem, challenge = (different or options)[0]
-        picks.append(_make_pick(target, problem, challenge))  # any_skill targets say "relaxed"
+        share = selector.success(problem)
+        picks.append(_make_pick(target, problem, challenge, share))  # any_skill: "relaxed"
     return picks
 
 
@@ -360,7 +375,7 @@ def _add_picks(
             challenge = _challenge(target, picks, count)
             problem = selector.best_problem(target, picks, challenge)
             if problem is not None:
-                picks.append(_make_pick(target, problem, challenge))
+                picks.append(_make_pick(target, problem, challenge, selector.success(problem)))
                 break  # the others stay waiting, to be compared with this new pick
 
 
@@ -372,35 +387,50 @@ def _skill_fits_batch(skill_id: str, picks: list[Pick]) -> bool:
 
 
 def _challenge(target: _Target, picks: list[Pick], count: int) -> Challenge:
-    """Whether the next place in a batch of `count` gets a solid or a stretch problem:
-    solid for the first place of a batch of 2 or more, stretch for the rest. A stuck
-    skill's easiest problem counts as solid wherever it is, since it is chosen easiest
-    first (see best_problem)."""
+    """Whether the next place in a batch of `count` looks for a solid or a stretch
+    problem: solid for the first place of a batch of 2 or more, stretch for the rest. A
+    stuck skill's easiest problem looks for solid wherever it is, since it is chosen
+    easiest first (see best_problem). What the pick finally says is decided after the
+    problem is found (see _label)."""
     if target.easiest:
         return "solid"
     return "solid" if count >= 2 and not picks else "stretch"
 
 
-def _make_pick(target: _Target, problem: Problem, challenge: Challenge) -> Pick:
-    """Turn a wanted skill and the problem found for it into a pick."""
+def _label(challenge: Challenge, share: float) -> Challenge:
+    """What a pick tells the student about how hard it is. A place that looked for a
+    solid problem says "solid" only if the problem found is predicted at least the low
+    end of TARGET_SUCCESS right (`share`); otherwise it says "stretch". Often no problem
+    inside the target is left (the 24-hour, unseen and floor rules come first), and a
+    problem the student would get 30 percent right must not be shown as a gentle one
+    (review board, 2026-11-26)."""
+    return "solid" if challenge == "solid" and share >= TARGET_SUCCESS[0] else "stretch"
+
+
+def _make_pick(target: _Target, problem: Problem, challenge: Challenge, share: float) -> Pick:
+    """Turn a wanted skill and the problem found for it into a pick. `challenge` is
+    what the place looked for and `share` the problem's predicted share right; the pick
+    says what _label makes of the two."""
     return Pick(
         problem_id=problem.id,
         reason=target.reason,
         is_follow_up=target.missed_step is not None,
         target_skill=target.skill,
         rule=target.rule,
-        challenge=challenge,
+        challenge=_label(challenge, share),
         missed_step=target.missed_step,
     )
 
 
-def _starting_check(course: Course, count: int) -> list[Pick]:
+def _starting_check(course: Course, state: MasteryState, count: int) -> list[Pick]:
     """Rule 1: a short set for a new student, covering as many skills as it can.
 
     Each round takes the problem that covers the most not-yet-covered skills with
     no prerequisites, then the easiest, then the one that covers the most other new
     skills, then the first in the course file. It stops at `count` problems, or when
-    no problem adds a skill.
+    no problem adds a skill. Each pick looks for solid (easiest first), but says solid
+    only if `state` predicts it at least the low end of TARGET_SUCCESS right (see
+    _label); for a brand-new student that is rarely so.
     """
     starting_skills = {skill.id for skill in course.skills if not skill.prerequisites}
     # A skill in every problem gets checked anyway, so it counts as covered from the start.
@@ -436,7 +466,7 @@ def _starting_check(course: Course, count: int) -> list[Pick]:
                 is_follow_up=False,
                 target_skill=target,
                 rule="starting_check",
-                challenge="solid",
+                challenge=_label("solid", _predicted_share(state, best)),
             )
         )
     return picks
@@ -819,8 +849,7 @@ class _Selector:
 
     def success(self, problem: Problem) -> float:
         """The predicted share of the problem's steps the student gets right first time."""
-        chances = [chance_correct(self.state, step) for step in problem.steps]
-        return sum(chances) / len(chances)
+        return _predicted_share(self.state, problem)
 
     def left_to_learn(self, problem: Problem, target_skill: str) -> float:
         """How much of the problem the student most likely can learn now: for each step,
@@ -943,6 +972,12 @@ class _Selector:
             same_type,
             same_family,
         )
+
+
+def _predicted_share(state: MasteryState, problem: Problem) -> float:
+    """The predicted share of the problem's steps the student gets right first time."""
+    chances = [chance_correct(state, step) for step in problem.steps]
+    return sum(chances) / len(chances)
 
 
 def _skills_in_every_problem(course: Course) -> set[str]:
