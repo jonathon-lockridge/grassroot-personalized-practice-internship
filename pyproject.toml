@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "practice-engine"
 version = "0.1.0"
 description = "Grassroot Personalized Practice: step-by-step practice that adapts to the student."
+readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["adaptive learning", "knowledge tracing", "education", "physics", "practice"]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
