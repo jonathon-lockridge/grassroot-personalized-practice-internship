@@ -22,6 +22,7 @@ from practice_engine.storage import (
     load_history,
     load_mastery,
     load_picks,
+    load_tries,
     open_storage,
     save_answer,
     save_picks,
@@ -132,6 +133,24 @@ def test_the_same_answer_sent_twice_is_stored_once(course: Course, path: Path) -
         assert load_history(db, course, "sam") == [answer(1, True)]
         (rows,) = db.execute("SELECT COUNT(*) FROM answers").fetchone()
         assert rows == 1
+
+
+def test_load_tries_gives_one_steps_tries_since_a_time_with_what_was_given(
+    course: Course, path: Path
+) -> None:
+    with closing(open_storage(path)) as db:
+        save_answer(db, course, answer(3, False, minute=0), given="9")  # before `since`
+        save_answer(db, course, answer(3, False, minute=5), given="8")
+        save_answer(db, course, answer(3, True, minute=6, attempt=2), given="5.48")
+        save_answer(db, course, answer(2, True, minute=7), given=30)  # another step
+        save_answer(db, course, answer(3, True, minute=8, nickname="lee"), given="5.5")
+
+        tries = load_tries(db, course, "sam", "push_cart", 3, START_TIME + timedelta(minutes=5))
+
+    assert tries == [
+        (answer(3, False, minute=5), "8"),
+        (answer(3, True, minute=6, attempt=2), "5.48"),
+    ]
 
 
 def test_a_second_try_is_not_a_duplicate(course: Course, path: Path) -> None:

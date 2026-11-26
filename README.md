@@ -8,7 +8,7 @@ Jonathon Lockridge, a high-school student and product design intern at [Grassroo
 
 Result so far: on 50 simulated students, the engine got 41 to 42 to learn every skill within 600 steps, about twice as many as a teacher's usual order (20 to 22). No real students have used it yet.
 
-Status: the engine, saved student records and the simulated-student test all work (315 automated tests). Jonathon is now checking every physics problem by hand. The student-facing practice page comes next.
+Status: the engine, saved student records, the simulated-student test and a first practice page all work. Jonathon is now trying the page himself and redesigning it until it feels right.
 
 ## The idea
 
@@ -105,7 +105,8 @@ A second test uses simpler, BKT-like students: each one follows the same kind of
 | `src/practice_engine/selection.py` | The next-problem rules and their reasons |
 | `src/practice_engine/storage.py` | Saved students, answers and picks (SQLite) |
 | `src/practice_engine/simulate.py` | The simulated-student comparison |
-| `src/practice_engine/api.py` | A small web server (FastAPI); for now it only answers a health check |
+| `src/practice_engine/api.py` | A small web server (FastAPI) that connects the practice page to the engine |
+| `src/practice_engine/page/` | The practice page, inside a minimal mock of Grassroot |
 | `data/ap-physics-c-energy-momentum/` | The physics course and its sources |
 | `tests/` | The automated tests, one file per part |
 | `PRD.md` / `TODO.md` | The plan, and the small numbered steps of the work |
@@ -123,15 +124,15 @@ source .venv/bin/activate                     # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest -q                                     # run the tests
 python -m practice_engine.simulate --seed 1   # the simulated-student comparison, about 7 seconds
-uvicorn practice_engine.api:app --reload      # web server; open http://127.0.0.1:8000/health
+uvicorn practice_engine.api:app --reload      # the practice page; open http://127.0.0.1:8000
 ```
 
 Before each commit, with the `.venv` folder active (`source .venv/bin/activate`), run `ruff format . && ruff check . && pytest -q`. GitHub runs the same checks on every push (there `ruff format --check .` only checks the layout instead of fixing it), plus a check that no secret was committed.
 
 ## Roadmap
 
-- T1b, checking the course (now): Jonathon works every physics problem on paper and fixes any step that is wrong, unclear or too easy.
-- T4, practice page: a practice page inside a minimal mock of Grassroot, where only practice is real and each follow-up shows why it was picked.
+- T4, practice page (now): a practice page inside a minimal mock of Grassroot, where only practice is real and each follow-up shows why it was picked. Built; Jonathon is trying it.
+- T1b, checking the course: Jonathon works every physics problem on paper and fixes any step that is wrong, unclear or too easy.
 - T7, making courses: generate a course from a topic or notes with an AI model; the course checker rejects bad output, and a person reviews what passes.
 - T8, real students: try it with friends and classmates under nicknames, with the same five-question check before and after.
 - T9, polish and write-up: polish the mock from what T8 shows, and write up the results of T6 and T8.

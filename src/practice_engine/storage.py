@@ -38,6 +38,8 @@ The helpers:
 - save_answer(db, course, answer, given=None): check and save one step answer.
   True if it was new, False if the same answer was already saved.
 - load_history(db, course, nickname): the student's saved answers, oldest first.
+- load_tries(db, course, nickname, problem_id, step_position, since): the student's
+  saved tries at one step from `since` on, oldest first, each with what was given.
 - load_mastery(db, course, nickname): the student's MasteryState, rebuilt.
 - check_saved_answers(db, course): plain complaints about saved answers that no
   longer match the course file. An empty list means they all match.
@@ -252,6 +254,43 @@ def load_history(db: sqlite3.Connection, course: Course, nickname: str) -> list[
     Answers with the same time come back in the order they were saved.
     """
     return [step_answer for step_answer, _ in _load_answers(db, course, nickname)]
+
+
+def load_tries(
+    db: sqlite3.Connection,
+    course: Course,
+    nickname: str,
+    problem_id: str,
+    step_position: int,
+    since: datetime,
+) -> list[tuple[StepAnswer, Given]]:
+    """The student's saved tries at one step, answered at `since` or later, oldest first.
+
+    Each item is (the answer, what the student gave, or None if nothing was saved).
+    The page uses this to work out which try comes next, instead of trusting the page.
+    """
+    rows = db.execute(
+        "SELECT correct, seconds, hints_used, answered_at, attempt, given FROM answers"
+        " WHERE nickname = ? AND course_id = ? AND problem_id = ? AND step_position = ?"
+        " AND answered_at >= ? ORDER BY answered_at, seq",
+        (nickname, course.id, problem_id, step_position, _to_text(since)),
+    ).fetchall()
+    return [
+        (
+            StepAnswer(
+                nickname=nickname,
+                problem_id=problem_id,
+                step_position=step_position,
+                correct=bool(correct),
+                seconds=seconds,
+                hints_used=hints_used,
+                answered_at=_from_text(answered_at),
+                attempt=attempt,
+            ),
+            None if given is None else json.loads(given),
+        )
+        for correct, seconds, hints_used, answered_at, attempt, given in rows
+    ]
 
 
 def load_mastery(db: sqlite3.Connection, course: Course, nickname: str) -> MasteryState:

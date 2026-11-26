@@ -4,6 +4,11 @@
 
 ## Now (one step only)
 
+- [ ] **T4 Practice page in a Grassroot mock.** A web page that looks like Grassroot, with everything fake except practice. The student answers each step, gets the T1c check and a hint on a miss (decide here whether they get a second try), and sees mastery per skill. When a problem is a follow-up, the page shows it clearly (for example a "Picked for you" tag naming the skill and the step that went wrong). Jonathon uses it himself and redesigns until it feels right. **Done when:** Jonathon can do three problems from first step to last, and each follow-up's reason is visible and makes sense to him.
+  - Built 2026-11-26: run `uvicorn practice_engine.api:app --reload` and open http://127.0.0.1:8000. A wrong first try gets why it is wrong and a hint, then one more try; a wrong second try shows the answer (Jonathon, 2026-11-26). Next: Jonathon does three problems and says what to change.
+
+## Next
+
 - [ ] **T1b Review the physics course.** Subject changed on 2026-11-19 (mentor meeting): AP Physics C: Mechanics, energy and momentum, in `data/ap-physics-c-energy-momentum/course.json`. It has 17 skills and 24 problems (7 easy, 9 medium, 8 hard), each starting with a "which principle applies?" step, and every wrong option says why it is wrong. Every number answer was recomputed by computer and checked by a second reviewer (its five small fixes are in). Number steps can now have a `tolerance` (how far off a typed answer may be and still count). Jonathon's part: work every problem on paper as test practice, using the step checklist below, and note any step that is wrong, unclear, too easy or missing a case from class. **Done when:** every note is fixed and the tests pass.
   - Step checklist (agreed 2026-11-16):
     1. Solve the problem yourself on paper.
@@ -11,10 +16,6 @@
     3. For a choice step, make sure every wrong option really is wrong, ideally a common mistake.
     4. Check the final answer makes physical sense (units, sign, size).
     5. Use the method your class teaches.
-
-## Next
-
-- [ ] **T4 Practice page in a Grassroot mock.** A web page that looks like Grassroot, with everything fake except practice. The student answers each step, gets the T1c check and a hint on a miss (decide here whether they get a second try), and sees mastery per skill. When a problem is a follow-up, the page shows it clearly (for example a "Picked for you" tag naming the skill and the step that went wrong). Jonathon uses it himself and redesigns until it feels right. **Done when:** Jonathon can do three problems from first step to last, and each follow-up's reason is visible and makes sense to him.
 - [ ] **T7 Generate a course from a topic or notes.** An AI model writes skills, prerequisites and step-by-step problems in the course file format; the T1a checker rejects bad output; generated problems are marked as generated, for a person to look over. Needs the AI-service decision in PRD.md; also extend the secret check in `.github/workflows/ci.yml` to that service's key format. **Done when:** a generated course passes the same checks as the hand-made one and a person can practice it in T4's walkthrough.
 - [ ] **T8 Try it on real people.** A handful of friends or classmates under nicknames. Each does the same short check of five questions before and after. For each practice session, compare the step the engine flagged as weak with what the student says they struggled with. **Done when:** at least five sessions are logged, and how often they matched (the hit rate) and the before-and-after scores are written down, with what to fix.
 - [ ] **T9 Make it presentable.** Polish the Grassroot mock using what T8 and the check-ins showed, plus a short write-up of the results from T6 and T8. **Done when:** a stranger can try it for fifteen minutes without help.
