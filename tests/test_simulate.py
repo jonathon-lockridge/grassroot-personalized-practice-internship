@@ -212,6 +212,7 @@ def pick(problem_id: str, skill: str) -> Pick:
         reason="A reason.",
         is_follow_up=False,
         rule="partway",
+        challenge="stretch",
     )
 
 

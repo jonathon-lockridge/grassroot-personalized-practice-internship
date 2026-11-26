@@ -6,7 +6,8 @@ One main helper:
   picks. Each pick names a problem, the skill it is meant to practice, one plain
   sentence telling the student why it was picked, and `rule`: a short fixed word
   saying which rule below made the pick (one of PICK_RULES), for checking and
-  counting the engine's choices.
+  counting the engine's choices, and `challenge`: "solid" or "stretch" (see "Solid
+  and stretch" below), so the page can show how hard a pick is meant to be.
 
 Only a step's first try counts as evidence here, as in mastery.py: a second try says
 little about what the student knew (research report, change 1). A wrong first try
@@ -64,6 +65,20 @@ Throughout:
 - Not too hard: a problem the student is predicted to get less than SUCCESS_FLOOR
   (50 percent) of steps right on never beats one at or above it (review board,
   2026-11-22): mostly-wrong practice is discouraging and teaches little.
+- Solid and stretch (decided 2026-11-26): in a batch of 2 or more, the first pick is
+  "solid" and the rest are "stretch"; a batch of 1 is stretch. A stretch problem is
+  chosen by "most left to learn" below. A solid problem skips that and goes straight
+  to the 70 to 85 percent target, closest to the middle (left to learn only breaks
+  ties). Why both: harder practice that the student mostly gets right teaches more
+  (Bjork, desirable difficulties), but learning is fastest at about 85 percent right
+  (Wilson and others, 2019), and a success soon after a miss, or early in a new skill,
+  helps the skill stick and keeps the student going. Why the first place: it is the
+  most important pick (often a follow-up after a miss, or a new skill), and the
+  session starts with a success. The starting check and a stuck skill's easiest
+  problem are always solid, as they are chosen easiest first. (T6, seeds 1 and 7: the
+  same as all-stretch for students who need prerequisites first, within 0.01 of
+  known share; a rule-based split, solid for new skills and follow-ups, finished 3 to
+  5 fewer of those students, so it was dropped.)
 - Most left to learn: for each skill, prefer the problem with the most the student
   probably still has to learn, the average over its steps of 1 minus the skill's
   number (see left_to_learn), so fewer steps go on skills they already know (T6
@@ -175,6 +190,11 @@ WATCH_LATER_HOURS = 12
 Rule = Literal["starting_check", "follow_up", "stuck", "partway", "review", "new_skill", "relaxed"]
 PICK_RULES: tuple[str, ...] = get_args(Rule)  # the same words, as a tuple, for counting
 
+# How hard a pick is meant to be (see "Solid and stretch" at the top): "solid" aims at
+# TARGET_SUCCESS, "stretch" at the most left to learn above SUCCESS_FLOOR.
+Challenge = Literal["solid", "stretch"]
+CHALLENGES: tuple[str, ...] = get_args(Challenge)  # the same words, as a tuple
+
 
 class MissedStep(BaseModel):
     """The step a student got wrong that a follow-up pick answers to."""
@@ -191,6 +211,7 @@ class Pick(BaseModel):
     is_follow_up: bool  # True when picked because of a specific missed step
     target_skill: str  # the id of the skill this pick is meant to practice
     rule: Rule  # which rule made this pick, one of PICK_RULES
+    challenge: Challenge  # "solid" or "stretch": how hard it is meant to be
     missed_step: MissedStep | None = None  # filled in only for a follow-up
 
 
@@ -257,7 +278,7 @@ def next_problems(
     # Rule 2: the follow-ups, but never the whole batch.
     max_follow_ups = 1 if count <= 2 else MAX_FOLLOW_UPS
     follow_ups = selector.follow_ups()
-    _add_picks(selector, picks, follow_ups, limit=min(count, max_follow_ups))
+    _add_picks(selector, picks, follow_ups, limit=min(count, max_follow_ups), count=count)
 
     # The mixing place: one pick kept for a new skill (batches of 3 or more) or, after a
     # follow-up, for any other skill (new, then review, then partway). It must not be a
@@ -278,12 +299,12 @@ def next_problems(
     places = min(count, MAX_BATCH_SKILLS)  # each pick here is for a skill of its own
     rest = partway + reviews + new
     if mixing:
-        _add_picks(selector, picks, rest, limit=places - 1)
+        _add_picks(selector, picks, rest, limit=places - 1, count=count)
         if not any(not pick.is_follow_up and pick.target_skill in wanted for pick in picks):
-            _add_picks(selector, picks, mixing, limit=len(picks) + 1)
-    _add_picks(selector, picks, rest, limit=count)
+            _add_picks(selector, picks, mixing, limit=len(picks) + 1, count=count)
+    _add_picks(selector, picks, rest, limit=count, count=count)
     # The last loosening: any skill, still one pick per skill.
-    _add_picks(selector, picks, selector.any_skill(), limit=count)
+    _add_picks(selector, picks, selector.any_skill(), limit=count, count=count)
     # Still short (a course with few skills, or a large `count`): now a skill may fill
     # more than one place, as long as each problem appears only once and, when there
     # is a choice, two picks in a row practice different skills.
@@ -293,14 +314,15 @@ def next_problems(
         for target in selector.any_skill():
             if len(batch_skills) >= MAX_BATCH_SKILLS and target.skill not in batch_skills:
                 continue  # the batch already has its three skills
-            problem = selector.best_problem(target, picks)
+            challenge = _challenge(target, picks, count)
+            problem = selector.best_problem(target, picks, challenge)
             if problem is not None:
-                options.append((target, problem))
+                options.append((target, problem, challenge))
         if not options:
             break  # every problem is already in the batch
         different = [option for option in options if option[0].skill != picks[-1].target_skill]
-        target, problem = (different or options)[0]
-        picks.append(_make_pick(target, problem))  # any_skill targets say "relaxed"
+        target, problem, challenge = (different or options)[0]
+        picks.append(_make_pick(target, problem, challenge))  # any_skill targets say "relaxed"
     return picks
 
 
@@ -309,10 +331,12 @@ def _add_picks(
     picks: list[Pick],
     targets: list["_Target"],
     limit: int,
+    count: int,
 ) -> None:
     """Add a pick for each target in turn, until `picks` has `limit` picks. A target is
     skipped when its skill is already in the batch, the batch has its MAX_BATCH_SKILLS
-    skills, or no problem fits.
+    skills, or no problem fits. `count` is the size of the whole batch, which decides
+    whether a place is solid or stretch (see _challenge).
 
     Mixing topics, a tiebreak only: among the next target and any others its rule
     ranked the same (see _Target.rank), one whose family the previous problem does
@@ -333,9 +357,10 @@ def _add_picks(
             waiting.remove(target)
             if not _skill_fits_batch(target.skill, picks):
                 continue
-            problem = selector.best_problem(target, picks)
+            challenge = _challenge(target, picks, count)
+            problem = selector.best_problem(target, picks, challenge)
             if problem is not None:
-                picks.append(_make_pick(target, problem))
+                picks.append(_make_pick(target, problem, challenge))
                 break  # the others stay waiting, to be compared with this new pick
 
 
@@ -346,7 +371,17 @@ def _skill_fits_batch(skill_id: str, picks: list[Pick]) -> bool:
     return skill_id not in batch_skills and len(batch_skills) < MAX_BATCH_SKILLS
 
 
-def _make_pick(target: _Target, problem: Problem) -> Pick:
+def _challenge(target: _Target, picks: list[Pick], count: int) -> Challenge:
+    """Whether the next place in a batch of `count` gets a solid or a stretch problem:
+    solid for the first place of a batch of 2 or more, stretch for the rest. A stuck
+    skill's easiest problem counts as solid wherever it is, since it is chosen easiest
+    first (see best_problem)."""
+    if target.easiest:
+        return "solid"
+    return "solid" if count >= 2 and not picks else "stretch"
+
+
+def _make_pick(target: _Target, problem: Problem, challenge: Challenge) -> Pick:
     """Turn a wanted skill and the problem found for it into a pick."""
     return Pick(
         problem_id=problem.id,
@@ -354,6 +389,7 @@ def _make_pick(target: _Target, problem: Problem) -> Pick:
         is_follow_up=target.missed_step is not None,
         target_skill=target.skill,
         rule=target.rule,
+        challenge=challenge,
         missed_step=target.missed_step,
     )
 
@@ -400,6 +436,7 @@ def _starting_check(course: Course, count: int) -> list[Pick]:
                 is_follow_up=False,
                 target_skill=target,
                 rule="starting_check",
+                challenge="solid",
             )
         )
     return picks
@@ -803,13 +840,16 @@ class _Selector:
         # still count as a tie and the later items decide.
         return round(left, 6)
 
-    def best_problem(self, target: _Target, picks: list[Pick]) -> Problem | None:
+    def best_problem(
+        self, target: _Target, picks: list[Pick], challenge: Challenge = "stretch"
+    ) -> Problem | None:
         """The best problem with a step on the target skill not already in `picks`, or None.
 
         The loosening order is built into the comparison (see _fit): any problem not
         answered in the last 24 hours beats one that was, any problem never seen beats
         one seen before, one at or above SUCCESS_FLOOR beats one below it, and then the
-        most left to learn wins, before TARGET_SUCCESS.
+        most left to learn wins, before TARGET_SUCCESS. For a "solid" `challenge`,
+        TARGET_SUCCESS comes before the most left to learn instead.
         For a stuck target with nothing to step back to (`easiest`), the success target
         is not used: the lowest difficulty wins, then an unseen problem.
         """
@@ -832,9 +872,13 @@ class _Selector:
                 ),
             )
         # min() keeps the first of equal problems, so course order breaks ties.
-        return min(candidates, key=lambda problem: self._fit(problem, previous, target.skill))
+        return min(
+            candidates, key=lambda problem: self._fit(problem, previous, target.skill, challenge)
+        )
 
-    def _fit(self, problem: Problem, previous: Problem, target_skill: str) -> tuple:
+    def _fit(
+        self, problem: Problem, previous: Problem, target_skill: str, challenge: Challenge
+    ) -> tuple:
         """How well a problem fits; smaller is better. Compared item by item:
 
         1. not answered in the last 24 hours first;
@@ -859,6 +903,9 @@ class _Selector:
         9. mixing: a first step whose answer differs from the previous problem's;
         10. mixing topics: a problem whose skills share no family with the previous
             problem's (see skill_families).
+
+        For a "solid" `challenge`, item 4 moves to just after item 8, so the 70 to 85
+        percent target decides first and left to learn only breaks ties.
         """
         low, high = TARGET_SUCCESS
         success = self.success(problem)
@@ -870,11 +917,25 @@ class _Selector:
         same_family = bool(
             self.families_of_problem[problem.id] & self.families_of_problem[previous.id]
         )
+        left = -self.left_to_learn(problem, target_skill)
+        if challenge == "solid":
+            return (
+                problem.id in self.recent,
+                problem.id in self.seen,
+                success < SUCCESS_FLOOR,
+                outside,
+                difficulty_if_outside,
+                distance,
+                problem.difficulty,
+                left,
+                same_type,
+                same_family,
+            )
         return (
             problem.id in self.recent,
             problem.id in self.seen,
             success < SUCCESS_FLOOR,
-            -self.left_to_learn(problem, target_skill),  # the minus sign: more left to learn first
+            left,  # the minus sign: more left to learn first
             outside,
             difficulty_if_outside,
             distance,

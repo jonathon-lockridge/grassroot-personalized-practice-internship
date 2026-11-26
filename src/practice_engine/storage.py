@@ -12,8 +12,9 @@ nothing new needs installing. The file has three tables:
   see which wrong option was chosen and read it back exactly: typed text keeps its
   quote marks, a number has none, and an order is a list in square brackets. It may
   be left empty.
-- picks: every next problem the engine chose, with its reason (PRD decision 4) and
-  the rule that made it (see selection.py).
+- picks: every next problem the engine chose, with its reason (PRD decision 4), the
+  rule that made it, and whether it was meant as a "solid" or a "stretch" problem
+  (see selection.py).
 
 The engine checks each answer itself. The page sends a right/wrong flag, but
 save_answer works it out again from what the student gave, with check_answer, and
@@ -113,6 +114,7 @@ CREATE TABLE IF NOT EXISTS picks (
     problem_id TEXT NOT NULL,
     target_skill TEXT NOT NULL,
     rule TEXT NOT NULL,  -- which rule made the pick, one of selection.PICK_RULES
+    challenge TEXT NOT NULL,  -- "solid" or "stretch", one of selection.CHALLENGES
     is_follow_up INTEGER NOT NULL,
     missed_problem_id TEXT,
     missed_step_position INTEGER,
@@ -123,7 +125,8 @@ CREATE TABLE IF NOT EXISTS picks (
 # The layout of the tables above, as a number SQLite keeps inside the file (its
 # "user_version"). Raise it whenever the layout or the meaning of a column changes.
 # 1: picks has a rule column, and `given` is JSON text.
-SCHEMA_VERSION = 1
+# 2: picks has a challenge column.
+SCHEMA_VERSION = 2
 
 # One delete for every table that holds rows about a student, for forget_student.
 FORGET_QUERIES = (
@@ -318,6 +321,7 @@ def save_picks(
             pick.problem_id,
             pick.target_skill,
             pick.rule,
+            pick.challenge,
             int(pick.is_follow_up),
             pick.missed_step.problem_id if pick.missed_step else None,
             pick.missed_step.step_position if pick.missed_step else None,
@@ -329,8 +333,8 @@ def save_picks(
         db.execute(_ADD_STUDENT, (nickname, course.id, created))
         db.executemany(
             "INSERT INTO picks (nickname, course_id, created_at, position, problem_id,"
-            " target_skill, rule, is_follow_up, missed_problem_id, missed_step_position,"
-            " reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " target_skill, rule, challenge, is_follow_up, missed_problem_id,"
+            " missed_step_position, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
 
@@ -343,8 +347,8 @@ def load_picks(
     Each item is (when the batch was made, the pick).
     """
     rows = db.execute(
-        "SELECT created_at, problem_id, target_skill, rule, is_follow_up, missed_problem_id,"
-        " missed_step_position, reason FROM picks"
+        "SELECT created_at, problem_id, target_skill, rule, challenge, is_follow_up,"
+        " missed_problem_id, missed_step_position, reason FROM picks"
         " WHERE nickname = ? AND course_id = ? ORDER BY created_at, seq",
         (nickname, course.id),
     ).fetchall()
@@ -354,6 +358,7 @@ def load_picks(
         problem_id,
         target_skill,
         rule,
+        challenge,
         is_follow_up,
         missed_problem,
         missed_step,
@@ -368,6 +373,7 @@ def load_picks(
             is_follow_up=bool(is_follow_up),
             target_skill=target_skill,
             rule=rule,
+            challenge=challenge,
             missed_step=missed,
         )
         saved.append((_from_text(created), pick))

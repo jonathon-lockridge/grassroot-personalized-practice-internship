@@ -302,6 +302,7 @@ def a_batch() -> list[Pick]:
             target_skill="work_constant_force",
             missed_step=MissedStep(problem_id="push_cart", step_position=2),
             rule="follow_up",
+            challenge="solid",
         ),
         Pick(
             problem_id="spring_launch",
@@ -309,6 +310,7 @@ def a_batch() -> list[Pick]:
             is_follow_up=False,
             target_skill="potential_energy",
             rule="new_skill",
+            challenge="stretch",
         ),
     ]
 
@@ -481,6 +483,29 @@ CREATE TABLE picks (
 def test_a_file_from_before_the_current_layout_is_refused_plainly(path: Path) -> None:
     with closing(sqlite3.connect(path)) as old:
         old.executescript(OLD_PICKS_TABLE)
+
+    with pytest.raises(ValueError, match="older version"):
+        open_storage(path)
+
+
+def test_each_pick_is_saved_with_how_hard_it_was_meant_to_be(course: Course, path: Path) -> None:
+    with closing(open_storage(path)) as db:
+        save_picks(db, course, "sam", a_batch(), START_TIME)
+        rows = db.execute("SELECT challenge FROM picks ORDER BY seq").fetchall()
+        loaded = [pick.challenge for _, pick in load_picks(db, course, "sam")]
+    assert rows == [("solid",), ("stretch",)]
+    assert loaded == ["solid", "stretch"]
+
+
+def test_a_file_from_before_picks_had_a_challenge_column_is_refused(path: Path) -> None:
+    # Layout 1: picks has a rule column but no challenge column.
+    layout_1 = OLD_PICKS_TABLE.replace(
+        "    is_follow_up INTEGER NOT NULL,",
+        "    rule TEXT NOT NULL,\n    is_follow_up INTEGER NOT NULL,",
+    )
+    with closing(sqlite3.connect(path)) as old:
+        old.executescript(layout_1)
+        old.execute("PRAGMA user_version = 1")
 
     with pytest.raises(ValueError, match="older version"):
         open_storage(path)
