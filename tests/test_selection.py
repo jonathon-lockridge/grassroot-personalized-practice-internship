@@ -32,6 +32,7 @@ from practice_engine.selection import (
     STUCK_STEPS,
     SUCCESS_FLOOR,
     WATCH_CLEAR_RIGHTS,
+    WATCH_LATER_HOURS,
     MissedStep,
     Pick,
     next_problems,
@@ -249,7 +250,7 @@ def test_rights_with_no_hint_in_two_problems_end_the_hint_follow_up() -> None:
     course = tiny_course(
         {"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"]), ("p3", 1, ["a"]), ("p4", 1, ["a"])]
     )
-    earlier = NOW - timedelta(hours=1)
+    earlier = NOW - timedelta(hours=20)  # yesterday, so the last right is a later session
     history = [
         answer("p1", 1, True, earlier, hints_used=1),
         answer("p2", 1, True, earlier),
@@ -304,7 +305,7 @@ def test_no_follow_up_once_the_missed_skill_was_right_in_two_problems() -> None:
     course = tiny_course(
         {"a": []}, [("p1", 1, ["a"]), ("p2", 1, ["a"]), ("p3", 1, ["a"]), ("p4", 1, ["a"])]
     )
-    earlier = NOW - timedelta(hours=1)
+    earlier = NOW - timedelta(hours=20)  # yesterday, so the last right is a later session
     history = [
         answer("p1", 1, False, earlier),
         answer("p2", 1, True, earlier),
@@ -386,10 +387,11 @@ def test_stuck_partway_skill_steps_back_too() -> None:
         [("pb", 1, ["b"]), ("pb2", 1, ["b"]), ("pb3", 1, ["b"]), ("pa", 1, ["a"])],
     )
     # Nine first tries on b, the last two right in two problems other than the one
-    # with the misses, so b is off the watch list and there is no follow-up.
+    # with the misses, the second a day later, so b is off the watch list and there is
+    # no follow-up.
     history = misses("pb", STUCK_STEPS - 1) + [
         answer("pb2", 1, True, LAST_WEEK + timedelta(hours=1)),
-        answer("pb3", 1, True, LAST_WEEK + timedelta(hours=2)),
+        answer("pb3", 1, True, LAST_WEEK + timedelta(hours=20)),
     ]
     mastery = {"a": READY_MASTERY + 0.05, "b": 0.4}
 
@@ -1378,7 +1380,7 @@ def test_a_stuck_partway_skill_says_stuck() -> None:
     )
     history = misses("pb", STUCK_STEPS - 1) + [
         answer("pb2", 1, True, LAST_WEEK + timedelta(hours=1)),
-        answer("pb3", 1, True, LAST_WEEK + timedelta(hours=2)),
+        answer("pb3", 1, True, LAST_WEEK + timedelta(hours=20)),
     ]
     mastery = {"a": READY_MASTERY + 0.05, "b": 0.4}
 
@@ -1482,9 +1484,39 @@ def test_one_right_answer_after_a_miss_keeps_the_skill_on_the_watch_list() -> No
 
 
 def test_rights_in_two_different_problems_clear_the_watch_list() -> None:
+    # The miss yesterday evening, one right then, one right this morning.
+    history = [
+        answer("p1", 1, False, hours_ago(20)),
+        answer("p2", 1, True, hours_ago(19)),
+        answer("p3", 1, True, hours_ago(1)),
+    ]
+
+    assert watch_picks(history)[0].is_follow_up is False
+
+
+def test_one_right_must_come_in_a_later_session() -> None:
+    assert WATCH_LATER_HOURS == 12
+    # Missed, then right in two other problems, all within the same hour.
     history = [
         answer("p1", 1, False, hours_ago(3)),
-        answer("p2", 1, True, hours_ago(2)),
+        answer("p2", 1, True, hours_ago(2.5)),
+        answer("p3", 1, True, hours_ago(2)),
+    ]
+
+    picks = watch_picks(history)
+
+    assert picks[0].is_follow_up is True
+    assert picks[0].missed_step == MissedStep(problem_id="p1", step_position=1)
+    assert picks[0].reason == (
+        "Picked for you: you missed step 1 of Problem p1 (Skill a) and have got it right "
+        "in 2 problems since, so this problem checks that you still know it today."
+    )
+
+
+def test_exactly_12_hours_later_counts_as_a_later_session() -> None:
+    history = [
+        answer("p1", 1, False, hours_ago(13)),
+        answer("p2", 1, True, hours_ago(12.5)),
         answer("p3", 1, True, hours_ago(1)),
     ]
 

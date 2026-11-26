@@ -22,7 +22,9 @@ The rules, most important first:
 2. Follow-up: each skill the student missed (or needed a hint on) goes on a watch
    list, and is practiced again in every batch, newest miss first, until it is right
    on the first try, with no hint, in WATCH_CLEAR_RIGHTS (2) different problems after
-   the latest miss; a new miss starts that count over (Stanford review, 2026-11-22).
+   the latest miss, at least one of them WATCH_LATER_HOURS (12) or more after the
+   miss; a new miss starts that count over (Stanford review, 2026-11-22; later-session
+   rule, 2026-11-26).
    One right answer is weak evidence, as a choice step can be guessed. Two rights in
    the same problem count once, and the problem of the miss itself does not count:
    a later step of it, minutes after the feedback, shows short-term memory. If the
@@ -113,7 +115,7 @@ Nothing here knows about algebra or physics, and nothing here touches the web
 server or stored data.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal, get_args
 
 from pydantic import BaseModel
@@ -162,6 +164,11 @@ MAX_FOLLOW_UPS = 2
 # problems after the latest miss. One right answer is weak evidence: a choice step can
 # be guessed 20 to 30 percent of the time.
 WATCH_CLEAR_RIGHTS = 2
+# ...and at least one of those right answers must come this many hours or more after
+# the miss, so in a later study session: remembering a skill a day later shows it was
+# learned, while getting it right minutes after the feedback may be short-term memory
+# (Jonathon, 2026-11-26).
+WATCH_LATER_HOURS = 12
 
 # The rule that made a pick, one short fixed word each (see the list at the top).
 # `Literal` means a Pick may hold only one of these words; any other is refused.
@@ -478,7 +485,8 @@ class _Selector:
         """The skills on the watch list, newest miss first: for each, its latest first
         try that was missed or needed a hint, and in how many different problems it has
         been right (first try, no hint) since. A skill leaves the list once that number
-        reaches WATCH_CLEAR_RIGHTS."""
+        reaches WATCH_CLEAR_RIGHTS and at least one of those rights came
+        WATCH_LATER_HOURS or more after the miss."""
         watched = []
         for skill in self.course.skills:
             tries = self.tries_of[skill.id]
@@ -492,7 +500,15 @@ class _Selector:
             # miss and its feedback, shows short-term memory, not that the skill was kept.
             right_in = {answer.problem_id for answer in tries[latest + 1 :]}
             right_in.discard(tries[latest].problem_id)
-            if len(right_in) < WATCH_CLEAR_RIGHTS:
+            # At least one right answer must come in a later session, not minutes later.
+            # Times are compared in UTC so a clock change does not shift the 12 hours.
+            later = tries[latest].answered_at.astimezone(UTC) + timedelta(hours=WATCH_LATER_HOURS)
+            right_later = any(
+                answer.answered_at.astimezone(UTC) >= later
+                for answer in tries[latest + 1 :]
+                if answer.problem_id in right_in
+            )
+            if len(right_in) < WATCH_CLEAR_RIGHTS or not right_later:
                 watched.append((tries[latest], len(right_in)))
         # Newest miss first. sorted() keeps course order for misses at the same time.
         return sorted(watched, key=lambda item: item[0].answered_at, reverse=True)
@@ -580,11 +596,16 @@ class _Selector:
             seen.add(target)
         if target == missed_skill and rights_since:
             # Tell the student why a skill they just got right is back.
-            once = "once" if rights_since == 1 else f"in {rights_since} problems"
-            reason = (
-                f"Picked for you: {where} and have got it right {once} since, "
-                "so this problem checks it again."
-            )
+            if rights_since == 1:
+                reason = (
+                    f"Picked for you: {where} and have got it right once since, "
+                    "so this problem checks it again."
+                )
+            else:
+                reason = (
+                    f"Picked for you: {where} and have got it right in {rights_since} "
+                    "problems since, so this problem checks that you still know it today."
+                )
         elif target == missed_skill:
             reason = f"Picked for you: {where}, so this problem practices that skill again."
         else:
