@@ -4,23 +4,23 @@ A practice engine that checks every step of a physics problem and picks the stud
 
 [![CI](https://github.com/jonathon-lockridge/grassroot-personalized-practice-internship/actions/workflows/ci.yml/badge.svg)](https://github.com/jonathon-lockridge/grassroot-personalized-practice-internship/actions/workflows/ci.yml)
 
-Jonathon Lockridge, a high-school student and product design intern at [Grassroot Academy](https://grassroot.academy), designs and leads the project, with Grassroot's cofounder as his mentor. He wrote the plan ([PRD.md](PRD.md)), chose the subject and the rules for picking problems, and decides how the engine is judged.
+Jonathon Lockridge, a high-school student and product design intern at [Grassroot Academy](https://grassroot.academy), designs and leads the project, mentored by Grassroot's cofounder. Jonathon wrote the plan ([PRD.md](PRD.md)), chose the subject and the rules for picking problems, and decides how the engine is judged.
 
 Result so far: on 50 simulated students, the engine got 41 to 42 to learn every skill within 600 steps, about twice as many as a teacher's usual order (20 to 22). No real students have used it yet.
 
-Status: the engine, saved student records, the simulated-student test and a first practice page all work. Jonathon is now trying the page himself and redesigning it until it feels right.
+Status: the engine, saved student records, the simulated-student test and a first practice page all work. Jonathon is now trying the page and redesigning it until it feels right.
 
 ## The idea
 
 A right-or-wrong mark on a whole physics problem hides where it went wrong. The student might have picked the wrong principle, found the wrong force, or slipped on the last line. Here each problem is split into steps, and each step practices one skill, so a wrong step points at the skill the student is stuck on. The engine estimates what the student knows, picks the next problems from that estimate, and tells the student why it picked each one.
 
-The engine knows nothing about physics. A course is a data file of skills and problems, so a new subject means a new file and no new code. The first course is AP Physics C: Mechanics, energy and momentum, with 17 skills and 24 problems, the unit Jonathon is studying, so he can judge every problem himself.
+The engine knows nothing about physics. A course is a data file of skills and problems, so a new subject means a new file and no new code. The first course is AP Physics C: Mechanics, energy and momentum, with 17 skills and 24 problems, the unit Jonathon is studying, so every problem gets judged by someone learning it.
 
 ## What Jonathon decided
 
-- **Easy and hard picks side by side.** The plan said to give problems a student should get 70 to 85% right. The first engine gave harder problems instead, because they leave more to learn. He chose to keep both: each batch has a "solid" pick near 70 to 85% and "stretch" picks that are harder but still at least half right.
-- **The test that counts uses realistic students.** Of the two kinds of simulated students, he chose the ones that need the basics before advanced skills, as real students do, as the bar the engine must pass.
-- **Only the engine is real.** On his mentor's suggestion, the practice page will sit inside a minimal, abstracted mock of Grassroot, close to what students learn in class. Only the engine and the data it needs are real.
+- **Easy and hard picks side by side.** The plan said to give problems a student should get 70 to 85% right. The first engine gave harder problems instead, because they leave more to learn. Jonathon chose to keep both: each batch has a "solid" pick near 70 to 85% and "stretch" picks that are harder but still at least half right.
+- **The test that counts uses realistic students.** Of the two kinds of simulated students, Jonathon chose the ones that need the basics before advanced skills, as real students do, as the bar the engine must pass.
+- **Only the engine is real.** On the mentor's suggestion, the practice page will sit inside a minimal, abstracted mock of Grassroot, close to what students learn in class. Only the engine and the data it needs are real.
 
 ## An example
 
