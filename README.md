@@ -4,24 +4,24 @@ A practice engine that checks every step of a physics problem and picks the stud
 
 [![CI](https://github.com/jonathon-lockridge/grassroot-personalized-practice-internship/actions/workflows/ci.yml/badge.svg)](https://github.com/jonathon-lockridge/grassroot-personalized-practice-internship/actions/workflows/ci.yml)
 
-Jonathon Lockridge, a high-school student and product design intern at [Grassroot Academy](https://grassroot.academy), designs and leads the project, mentored by Grassroot's cofounder. Jonathon wrote the plan ([PRD.md](PRD.md)), chose the subject and the rules for picking problems, and decides how the engine is judged.
+I'm Jonathon Lockridge, a high-school student and product design intern at [Grassroot Academy](https://grassroot.academy). I design and lead this project, mentored by Grassroot's cofounder. I wrote the plan ([PRD.md](PRD.md)), chose the subject and the rules for picking problems, and decide how the engine is judged.
 
 Result so far: on 50 simulated students, the engine got 41 to 42 to learn every skill within 600 steps, about twice as many as a teacher's usual order (20 to 22). No real students have used it yet.
 
-Status: the engine, saved student records, the simulated-student test and a practice page all work. On the page, a student reads a short lesson, then practices it one problem at a time. Jonathon is now trying the page and redesigning it until it feels right; problem variants (new numbers, same ideas) come next.
+Status: the engine, saved student records, the simulated-student test and a practice page all work. On the page, a student reads a short lesson, then practices it one problem at a time. I'm now trying the page and redesigning it until it feels right, and rewriting the problems to AP level with variants (new numbers, same ideas), one lesson first.
 
 ## The idea
 
 A right-or-wrong mark on a whole physics problem hides where it went wrong. The student might have picked the wrong principle, found the wrong force, or slipped on the last line. Here each problem is split into steps, and each step practices one skill, so a wrong step points at the skill the student is stuck on. The engine estimates what the student knows, picks the next problems from that estimate, and tells the student why it picked each one.
 
-The engine knows nothing about physics. A course is a data file of skills, problems, and units and lessons that follow the course's own curriculum, so a new subject means a new file and no new code. A course has as many skills as its material needs. The first course is AP Physics C: Mechanics, energy and momentum, with 17 skills and 24 problems, the unit Jonathon is studying, so every problem gets judged by someone learning it.
+The engine knows nothing about physics. A course is a data file of skills, problems, and units and lessons that follow the course's own curriculum, so a new subject means a new file and no new code. A course has as many skills as its material needs. The first course is AP Physics C: Mechanics, energy and momentum, with 17 skills and 24 problems, the unit I'm studying, so I judge every problem as someone learning it.
 
-## What Jonathon decided
+## What I decided
 
-- **Easy and hard picks side by side.** The plan said to give problems a student should get 70 to 85% right. The first engine gave harder problems instead, because they leave more to learn. Jonathon chose to keep both: each batch has a "solid" pick near 70 to 85% and "stretch" picks that are harder but still at least half right.
-- **The test that counts uses realistic students.** Of the two kinds of simulated students, Jonathon chose the ones that need the basics before advanced skills, as real students do, as the bar the engine must pass.
+- **Easy and hard picks side by side.** The plan said to give problems a student should get 70 to 85% right. The first engine gave harder problems instead, because they leave more to learn. I chose to keep both: each batch has a "solid" pick near 70 to 85% and "stretch" picks that are harder but still at least half right.
+- **The test that counts uses realistic students.** Of the two kinds of simulated students, I chose the ones that need the basics before advanced skills, as real students do, as the bar the engine must pass.
 - **Practice follows the lesson.** After a lesson, practice is mostly on that lesson's skills, one problem at a time, with a follow-up first after a miss and a review from an earlier lesson about 1 problem in 4. Lessons follow the College Board's units and topics.
-- **Only the engine is real.** On the mentor's suggestion, the practice page will sit inside a minimal, abstracted mock of Grassroot, close to what students learn in class. Only the engine and the data it needs are real.
+- **Only the engine is real.** On my mentor's suggestion, the practice page will sit inside a minimal, abstracted mock of Grassroot, close to what students learn in class. Only the engine and the data it needs are real.
 
 ## An example
 
@@ -83,7 +83,7 @@ On both test runs below, the engine got about twice as many students to learn ev
 
 "Learned every skill" counts students who truly knew every skill at once within 600 steps. "Average known" is the students' average true knowledge.
 
-A second test uses simpler, BKT-like students: each one follows the same kind of model as the engine (knows a skill or not, with guesses and slips, at its own chances) and can learn advanced skills before the basics, which real students mostly cannot. With them the engine still gets the most students to the finish (48 of 50 on both seeds, against 41 and 42 for expert and 36 and 39 for random). But both other orders are ahead early (on seed 1, 65% for expert and 61% for random against 58% after 100 steps), and the engine catches up by 300 steps. Jonathon chose the first kind as the real test because it learns more like real students. The simulated students' settings were fixed before the first run, but they are a model, and real students may learn differently.
+A second test uses simpler, BKT-like students: each one follows the same kind of model as the engine (knows a skill or not, with guesses and slips, at its own chances) and can learn advanced skills before the basics, which real students mostly cannot. With them the engine still gets the most students to the finish (48 of 50 on both seeds, against 41 and 42 for expert and 36 and 39 for random). But both other orders are ahead early (on seed 1, 65% for expert and 61% for random against 58% after 100 steps), and the engine catches up by 300 steps. I chose the first kind as the real test because it learns more like real students. The simulated students' settings were fixed before the first run, but they are a model, and real students may learn differently.
 
 ## Research behind the design
 
@@ -134,8 +134,8 @@ Before each commit, with the `.venv` folder active (`source .venv/bin/activate`)
 
 ## Roadmap
 
-- T4, practice page (now): a practice page inside a minimal mock of Grassroot, where only practice is real and each follow-up shows why it was picked. Built; Jonathon is trying it.
-- T1b, checking the course: Jonathon works every physics problem on paper and fixes any step that is wrong, unclear or too easy.
+- T4, practice page (now): a practice page inside a minimal mock of Grassroot, where only practice is real and each follow-up shows why it was picked. Built; I'm trying it.
+- T1b, checking the course: I work every physics problem on paper and fixes any step that is wrong, unclear or too easy.
 - T7, making courses: generate a course from a topic or notes with an AI model; the course checker rejects bad output, and a person reviews what passes.
 - T8, real students: try it with friends and classmates under nicknames, with the same five-question check before and after.
 - T9, polish and write-up: polish the mock from what T8 shows, and write up the results of T6 and T8.

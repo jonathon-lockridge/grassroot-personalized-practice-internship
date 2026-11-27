@@ -17,7 +17,7 @@ The requests:
 - POST /api/start {nickname}: the student's mastery and their next problems.
 - POST /api/answer: check one try at one step, save it, and say what the page shows
   next. A wrong first try gets why it is wrong and a hint, and one more try; a wrong
-  second try also gets the right answer, and the step ends (Jonathon, 2026-11-26).
+  second try also gets the right answer, and the step ends (decided 2026-11-26).
   Text that cannot be read, such as "five", a choice that is not one of the options,
   or an order of other items, is not saved: the student answers again.
   The server works out which try this is from the tries saved since `started_at`,

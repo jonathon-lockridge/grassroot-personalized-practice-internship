@@ -214,10 +214,10 @@ WATCH_CLEAR_RIGHTS = 2
 # ...and at least one of those right answers must come this many hours or more after
 # the miss, so in a later study session: remembering a skill a day later shows it was
 # learned, while getting it right minutes after the feedback may be short-term memory
-# (Jonathon, 2026-11-26).
+# (decided 2026-11-26).
 WATCH_LATER_HOURS = 12
 # When practicing one lesson, after this many problems in a row only on the lesson, the
-# next is a review from outside it, if one is due: about 1 in 4 (Jonathon, 2026-11-26).
+# next is a review from outside it, if one is due: about 1 in 4 (decided 2026-11-26).
 LESSON_RUN = 3
 
 # The rule that made a pick, one short fixed word each (see the list at the top).
