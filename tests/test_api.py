@@ -366,3 +366,99 @@ def test_order_steps_are_checked_and_nonsense_orders_asked_again(client: TestCli
     assert send(["something else", *right_order[1:]])["readable"] is False
     assert send(list(reversed(right_order)))["correct"] is False
     assert send(right_order, attempt=2)["correct"] is True
+
+
+# Lessons (decided 2026-11-26): a lesson, then its practice, one problem at a time.
+
+
+def test_course_lists_its_units_and_lessons_with_notes(client: TestClient) -> None:
+    units = client.get("/api/course").json()["units"]
+
+    titles = [lesson["title"] for unit in units for lesson in unit["lessons"]]
+    assert "3.2 Work" in titles
+    work = next(
+        lesson for unit in units for lesson in unit["lessons"] if lesson["id"] == "3_2_work"
+    )
+    assert "work_energy_theorem" in work["skills"] and work["notes"]
+
+
+def test_lesson_practice_starts_on_that_lessons_skills(client: TestClient) -> None:
+    response = client.post("/api/lesson/next", json={"nickname": "kiwi", "lesson_id": "3_5_power"})
+
+    assert response.status_code == 200
+    pick = response.json()["pick"]
+    assert pick["skill_name"].startswith("Power")
+    assert pick["reason"]
+
+
+def test_an_unknown_lesson_is_a_404(client: TestClient) -> None:
+    response = client.post("/api/lesson/next", json={"nickname": "kiwi", "lesson_id": "nope"})
+
+    assert response.status_code == 404
+
+
+def test_a_course_with_no_lesson_chosen_practices_the_whole_course(client: TestClient) -> None:
+    response = client.post("/api/lesson/next", json={"nickname": "kiwi"})
+
+    assert response.json()["pick"]["rule"] == "starting_check"
+
+
+def test_any_subject_works_the_same_way(tmp_path: Path, clock: Clock) -> None:
+    # A made-up course with nothing to do with physics, to show lessons are data only.
+    def problem(problem_id: str, skill: str, answer: int) -> dict:
+        return {
+            "id": problem_id,
+            "title": f"Song {problem_id}",
+            "prompt": "Count the beats.",
+            "difficulty": 1,
+            "steps": [
+                {
+                    "prompt": "How many?",
+                    "kind": "number",
+                    "answer": answer,
+                    "hint": "Count.",
+                    "skill": skill,
+                }
+            ],
+        }
+
+    music = {
+        "id": "music-basics",
+        "title": "Music basics",
+        "skills": [{"id": "beats", "name": "Count beats"}, {"id": "rests", "name": "Count rests"}],
+        "problems": [problem("one", "beats", 4), problem("two", "rests", 2)],
+        "units": [
+            {
+                "title": "Unit 1 · Rhythm",
+                "lessons": [
+                    {"id": "beats_lesson", "title": "1.1 Beats", "skills": ["beats"]},
+                    {"id": "rests_lesson", "title": "1.2 Rests", "skills": ["rests"]},
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "music.json"
+    path.write_text(json.dumps(music), encoding="utf-8")
+    music_client = TestClient(create_app(path, tmp_path / "music.db", clock=clock))
+
+    first = music_client.post(
+        "/api/lesson/next", json={"nickname": "kiwi", "lesson_id": "rests_lesson"}
+    )
+    assert first.json()["pick"]["problem_id"] == "two"
+    started = music_client.get("/api/problems/two").json()["started_at"]
+    sent = {
+        "nickname": "kiwi",
+        "problem_id": "two",
+        "step_position": 1,
+        "given": "2",
+        "seconds": 5.0,
+        "hints_used": 0,
+        "attempt": 1,
+        "started_at": started,
+    }
+    assert music_client.post("/api/answer", json=sent).json()["correct"] is True
+    # The lesson's only problem is done for today, and "beats" was never taught.
+    again = music_client.post(
+        "/api/lesson/next", json={"nickname": "kiwi", "lesson_id": "rests_lesson"}
+    )
+    assert again.json() == {"pick": None}

@@ -12,8 +12,8 @@
     <span class="brand"><span class="brand-mark" aria-hidden="true">✿</span> Grassroot <span class="mock-tag">mock</span></span>
     <nav class="topnav" aria-label="Main">
       <span class="nav-item fake">Home</span>
+      <span class="nav-item active">Learn</span>
       <span class="nav-item fake">Library</span>
-      <span class="nav-item active">Practice</span>
     </nav>
     <span id="who" class="who" hidden></span>
   </header>
@@ -23,48 +23,55 @@
     <div class="card welcome-card">
       <p class="eyebrow">Your course</p>
       <h1 id="course-title">Loading…</h1>
-      <p class="muted">Practice problems picked for you, one step at a time. Each pick says why it was chosen.</p>
+      <p class="muted">Read a short lesson, then practice problems picked for you, one step at a time. Each problem says why it was chosen.</p>
       <form id="start-form" autocomplete="off">
         <label for="nickname">Nickname</label>
         <input id="nickname" name="nickname" maxlength="24" required
                pattern="[A-Za-z0-9](?:[A-Za-z0-9 _\-]{0,22}[A-Za-z0-9_\-])?"
                placeholder="for example kiwi">
         <p class="small muted">Use a nickname, not your real name. Letters, digits, spaces, _ and -.</p>
-        <button class="btn primary" type="submit">Start practice</button>
+        <button id="start-button" class="btn primary" type="submit" disabled>Start</button>
         <p id="start-error" class="error" role="alert"></p>
       </form>
     </div>
   </main>
 
-  <!-- Screen 2: the practice page. -->
+  <!-- Screen 2: a lesson, then its practice. -->
   <div id="app" class="layout" hidden>
-    <aside class="lessons" aria-label="Lessons (mock)">
-      <p class="eyebrow">Lessons</p>
-      <p class="lesson-unit">Unit 3 · Work, energy and power</p>
-      <ul class="lesson-list">
-        <li class="fake">Work and kinetic energy</li>
-        <li class="fake">Potential energy and conservation</li>
-        <li class="fake">Power</li>
-      </ul>
-      <p class="lesson-unit">Unit 4 · Linear momentum</p>
-      <ul class="lesson-list">
-        <li class="fake">Impulse and momentum</li>
-        <li class="fake">Collisions</li>
-        <li class="fake">Center of mass</li>
-      </ul>
-      <p class="lesson-practice">▸ Practice</p>
-      <p class="small muted">Lessons are a mock. Only practice works.</p>
-    </aside>
+    <nav class="lessons" aria-label="Lessons">
+      <details id="lesson-picker" open>
+        <summary class="eyebrow">Lessons<span id="lesson-picker-current" class="picker-current"></span></summary>
+        <div id="lesson-nav"></div>
+      </details>
+    </nav>
 
     <main class="practice">
       <p id="page-error" class="error-box" role="alert" hidden></p>
-      <section id="next-view">
-        <h2>Up next</h2>
-        <p class="muted small">Picked from your answers so far. Start with the first, or choose another.</p>
-        <div id="picks"></div>
+
+      <!-- The lesson: a short stand-in for Grassroot's real lesson material. -->
+      <section id="lesson-view" hidden>
+        <article class="card lesson-card">
+          <p id="lesson-unit" class="eyebrow"></p>
+          <div class="lesson-head">
+            <h1 id="lesson-title" tabindex="-1"></h1>
+            <span class="chip">Lesson (mock)</span>
+          </div>
+          <ul id="lesson-notes" class="lesson-notes"></ul>
+          <div class="practice-cta">
+            <div>
+              <h2>Practice this lesson</h2>
+              <p class="small muted">Problems on this lesson, one at a time, each with the reason it was picked. Now and then a quick review from an earlier lesson keeps it fresh.</p>
+            </div>
+            <button id="start-practice" class="btn primary" type="button">Start practice →</button>
+          </div>
+        </article>
       </section>
 
       <section id="problem-view" hidden>
+        <div class="practice-bar">
+          <button class="btn quiet back-to-lesson" type="button">← Back to lesson</button>
+          <span id="practice-count" class="small muted"></span>
+        </div>
         <div id="why-banner"></div>
         <div class="card problem-card">
           <div class="problem-head">
@@ -78,10 +85,24 @@
 
       <section id="summary-view" hidden>
         <div class="card">
-          <h2 id="summary-title"></h2>
+          <h2 id="summary-title" tabindex="-1"></h2>
           <p id="summary-line"></p>
           <ul id="summary-skills" class="summary-skills"></ul>
-          <button id="see-next" class="btn primary" type="button">See what's next</button>
+          <div class="actions">
+            <button id="next-problem" class="btn primary" type="button">Next problem →</button>
+            <button class="btn back-to-lesson" type="button">Back to lesson</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="done-view" hidden>
+        <div class="card">
+          <h2 id="done-title" tabindex="-1">That's this lesson's practice for today</h2>
+          <p id="done-line"></p>
+          <div class="actions">
+            <button id="next-lesson" class="btn primary" type="button">Next lesson →</button>
+            <button class="btn back-to-lesson" type="button">Back to lesson</button>
+          </div>
         </div>
       </section>
     </main>
@@ -89,6 +110,9 @@
     <aside class="skills" aria-label="Your skills">
       <h2>Your skills</h2>
       <p class="small muted">Where you are on each skill. Only your first try at a step counts.</p>
+      <h3 class="skill-group">This lesson</h3>
+      <ul id="mastery-lesson" class="mastery"></ul>
+      <h3 class="skill-group">Other skills</h3>
       <ul id="mastery" class="mastery"></ul>
     </aside>
   </div>

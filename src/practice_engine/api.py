@@ -7,7 +7,8 @@ storage); this file only passes values between them and the page.
 The requests:
 
 - GET /: the practice page (files in the `page` folder next to this file).
-- GET /api/course: the course title, its skills in course order, and its problem ids.
+- GET /api/course: the course title, its skills in course order, its problem ids, and
+  its units and lessons (each lesson with its skills and its short notes).
 - GET /api/problems/{id}: one problem for the page, without answers or why-wrong
   messages, so the page cannot give them away. A choice step's options and an order
   step's items come shuffled, so the right one is not always in the same place. It
@@ -25,6 +26,9 @@ The requests:
   once; anything else on a finished step is refused (409).
 - POST /api/next {nickname}: a fresh batch of next problems, each with its reason,
   saved with save_picks so the record shows what the engine decided and why.
+- POST /api/lesson/next {nickname, lesson_id}: the one next problem while practicing a
+  lesson (selection.next_problem), saved the same way, or null when the lesson has
+  nothing fresh left today. With no lesson_id, the whole course is the lesson.
 
 Students go by nickname only. There is no sign-in: this is a local demo, so someone
 writing their own requests could reopen a problem to get fresh first tries. Plugging
@@ -49,7 +53,7 @@ from practice_engine import __version__
 from practice_engine.checking import can_read, check_answer
 from practice_engine.mastery import is_mastered
 from practice_engine.models import Step, StepAnswer, load_course, validate_course
-from practice_engine.selection import Pick, next_problems
+from practice_engine.selection import READY_MASTERY, Pick, next_problem, next_problems
 from practice_engine.storage import (
     load_history,
     load_mastery,
@@ -78,6 +82,11 @@ Nickname = Annotated[
 
 class StartRequest(BaseModel):
     nickname: Nickname
+
+
+class LessonRequest(BaseModel):
+    nickname: Nickname
+    lesson_id: str | None = None  # None: practice the whole course
 
 
 class AnswerRequest(BaseModel):
@@ -110,6 +119,7 @@ def create_app(
     now = clock or (lambda: datetime.now(UTC))
     skill_names = {skill.id: skill.name for skill in course.skills}
     problems = {problem.id: problem for problem in course.problems}
+    lessons = {lesson.id: lesson for unit in course.units for lesson in unit.lessons}
 
     app = FastAPI(title="Grassroot Personalized Practice", version=__version__)
     app.mount("/page", StaticFiles(directory=PAGE), name="page")
@@ -145,6 +155,8 @@ def create_app(
                 "mastery": round(state.mastery[skill.id], 4),
                 "mastered": is_mastered(state, history, skill.id, course),
                 "tried": skill.id in tried,
+                # Every skill it builds on is known well enough to start it now.
+                "ready": all(state.mastery[p] >= READY_MASTERY for p in skill.prerequisites),
             }
             for skill in course.skills
         ]
@@ -168,6 +180,7 @@ def create_app(
             "rule": pick.rule,
             "challenge": pick.challenge,
             "is_follow_up": pick.is_follow_up,
+            "skill_id": pick.target_skill,
             "skill_name": skill_names[pick.target_skill],
             "missed": missed,
         }
@@ -196,6 +209,21 @@ def create_app(
             "title": course.title,
             "skills": [{"id": skill.id, "name": skill.name} for skill in course.skills],
             "problem_ids": list(problems),
+            "units": [
+                {
+                    "title": unit.title,
+                    "lessons": [
+                        {
+                            "id": lesson.id,
+                            "title": lesson.title,
+                            "skills": lesson.skills,
+                            "notes": lesson.notes,
+                        }
+                        for lesson in unit.lessons
+                    ],
+                }
+                for unit in course.units
+            ],
         }
 
     @app.get("/api/problems/{problem_id}")
@@ -239,6 +267,24 @@ def create_app(
     def next_view(request: StartRequest) -> dict:
         with closing(open_storage(db_path)) as db:
             return {"picks": next_batch(db, request.nickname)}
+
+    @app.post("/api/lesson/next")
+    def lesson_next(request: LessonRequest) -> dict:
+        if request.lesson_id is None:
+            focus = None  # the whole course, with the usual readiness rule
+        elif request.lesson_id in lessons:
+            focus = set(lessons[request.lesson_id].skills)
+        else:
+            raise HTTPException(404, f"No lesson '{request.lesson_id}'.")
+        moment = now()
+        with closing(open_storage(db_path)) as db:
+            state = load_mastery(db, course, request.nickname)
+            history = load_history(db, course, request.nickname)
+            pick = next_problem(course, state, history, moment, focus)
+            if pick is None:
+                return {"pick": None}
+            save_picks(db, course, request.nickname, [pick], moment)
+            return {"pick": pick_view(pick)}
 
     @app.post("/api/answer")
     def answer(request: AnswerRequest) -> dict:

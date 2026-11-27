@@ -25,6 +25,11 @@ const ALMOST = 0.6;
 
 const state = {
   nickname: null,
+  units: [], // [{title, lessons: [{id, title, skills, notes}]}] from the course file
+  lesson: null, // the lesson open now: {id, title, skills, notes, unit}
+  done: 0, // problems finished in this practice run, for "Problem 3" above a problem
+  courseId: null,
+  loading: false, // true while the next problem is on its way, so a double click sends one request
   mastery: [], // [{id, name, mastery, mastered, tried}] in course order
   problem: null, // the problem being worked, as the server sent it
   pick: null, // the pick that led to it
@@ -73,10 +78,15 @@ async function api(path, body) {
   return response.json();
 }
 
+// Show one view and move the keyboard to its heading, since the button just pressed is
+// usually hidden by the change. A problem's own first input takes focus instead.
+const VIEW_HEADINGS = { "lesson-view": "lesson-title", "summary-view": "summary-title", "done-view": "done-title" };
+
 function show(view) {
   $("page-error").hidden = true;
-  for (const id of ["next-view", "problem-view", "summary-view"]) $(id).hidden = id !== view;
+  for (const id of ["lesson-view", "problem-view", "summary-view", "done-view"]) $(id).hidden = id !== view;
   window.scrollTo({ top: 0 });
+  if (VIEW_HEADINGS[view]) $(VIEW_HEADINGS[view]).focus({ preventScroll: true });
 }
 
 function percent(value) {
@@ -95,11 +105,11 @@ function levelOf(skill) {
 
 // ---------- start ----------
 
-// The browser may refuse site storage; remembering the nickname is only a convenience.
-function remember(nickname) {
+// The browser may refuse site storage; remembering is only a convenience.
+function remember(key, value) {
   try {
-    if (nickname === undefined) return localStorage.getItem("practice-nickname");
-    localStorage.setItem("practice-nickname", nickname);
+    if (value === undefined) return localStorage.getItem(`practice-${key}`);
+    localStorage.setItem(`practice-${key}`, value);
   } catch (error) {
     return null;
   }
@@ -115,14 +125,36 @@ function showError(message) {
 async function init() {
   // Listeners first, so pressing Start early never falls back to a plain form send.
   $("start-form").addEventListener("submit", onStart);
-  $("see-next").addEventListener("click", loadNext);
-  const saved = remember();
+  $("start-practice").addEventListener("click", startPractice);
+  $("next-problem").addEventListener("click", loadNextProblem);
+  $("next-lesson").addEventListener("click", () => openLesson(nextLesson().id));
+  // Widening the window shows the full lesson list again.
+  const wide = window.matchMedia("(min-width: 1001px)");
+  wide.addEventListener("change", (event) => {
+    if (event.matches) $("lesson-picker").open = true;
+  });
+  // On a wide screen the lesson list always shows, even if a key press tries to fold it.
+  $("lesson-picker").addEventListener("toggle", () => {
+    if (wide.matches && !$("lesson-picker").open) $("lesson-picker").open = true;
+  });
+  for (const button of document.querySelectorAll(".back-to-lesson")) {
+    button.addEventListener("click", () => openLesson(state.lesson.id));
+  }
+  const saved = remember("nickname");
   if (saved) $("nickname").value = saved;
   try {
     const course = await api("/api/course");
     $("course-title").textContent = course.title;
+    state.courseId = course.id;
+    // A course with no units is practiced as one whole lesson.
+    state.units = course.units.length ? course.units : [{
+      title: course.title,
+      lessons: [{ id: null, title: "Practice", skills: course.skills.map((s) => s.id), notes: [] }],
+    }];
+    $("start-button").disabled = false; // only now is there a lesson to open
   } catch (error) {
     $("course-title").textContent = "Could not reach the practice engine.";
+    $("start-error").textContent = "Start the practice engine, then reload this page.";
   }
 }
 
@@ -140,7 +172,7 @@ async function onStart(event) {
     return;
   }
   state.nickname = start.nickname;
-  remember(nickname);
+  remember("nickname", nickname);
   $("welcome").hidden = true;
   $("app").hidden = false;
   const who = $("who");
@@ -149,16 +181,104 @@ async function onStart(event) {
     `${nickname} · `,
     el("button", { class: "btn quiet", type: "button", text: "change", onclick: () => location.reload() }),
   );
-  renderMastery(start.mastery);
-  renderPicks(start.picks);
+  state.mastery = start.mastery;
+  openLesson(firstLesson());
+}
+
+// ---------- lessons ----------
+
+function allLessons() {
+  return state.units.flatMap((unit) => unit.lessons.map((lesson) => ({ ...lesson, unit: unit.title })));
+}
+
+// The saved lesson belongs to one student and one course.
+function lessonKey() {
+  return `lesson:${state.courseId}:${state.nickname}`;
+}
+
+// The lesson to open: the one this student last opened, unless they have mastered it, or
+// else the first, in course order, with a skill they can start now (not mastered, and
+// everything it builds on known).
+function firstLesson() {
+  const lessons = allLessons();
+  const saved = lessons.find((lesson) => lesson.id === remember(lessonKey()));
+  if (saved && !lessonDone(saved)) return saved.id;
+  const startable = new Set(state.mastery.filter((s) => !s.mastered && s.ready).map((s) => s.id));
+  const open = lessons.find((lesson) => lesson.skills.some((id) => startable.has(id)));
+  return (open || lessons[0]).id;
+}
+
+function nextLesson() {
+  const lessons = allLessons();
+  const index = lessons.findIndex((lesson) => lesson.id === state.lesson.id);
+  return lessons[index + 1] || null;
+}
+
+function lessonDone(lesson) {
+  const mastered = new Set(state.mastery.filter((s) => s.mastered).map((s) => s.id));
+  return lesson.skills.length > 0 && lesson.skills.every((id) => mastered.has(id));
+}
+
+function renderLessonNav() {
+  $("lesson-nav").replaceChildren(
+    ...state.units.map((unit) =>
+      el(
+        "div",
+        { class: "lesson-unit-block" },
+        el("p", { class: "lesson-unit", text: unit.title }),
+        el(
+          "ul",
+          { class: "lesson-list" },
+          ...unit.lessons.map((lesson) =>
+            el(
+              "li",
+              {},
+              el(
+                "button",
+                {
+                  type: "button",
+                  class: lesson.id === state.lesson?.id ? "lesson-link current" : "lesson-link",
+                  "aria-current": lesson.id === state.lesson?.id ? "page" : null,
+                  onclick: () => openLesson(lesson.id),
+                },
+                lesson.title,
+                lessonDone(lesson) ? el("span", { class: "lesson-check", "aria-hidden": "true", text: " ✓" }) : null,
+                lessonDone(lesson) ? el("span", { class: "visually-hidden", text: " (all skills mastered)" }) : null,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function openLesson(lessonId) {
+  state.lesson = allLessons().find((lesson) => lesson.id === lessonId);
+  if (lessonId !== null) remember(lessonKey(), lessonId);
+  $("lesson-unit").textContent = state.lesson.unit;
+  $("lesson-title").textContent = state.lesson.title;
+  $("lesson-notes").replaceChildren(...state.lesson.notes.map((note) => el("li", { text: note })));
+  $("lesson-notes").hidden = !state.lesson.notes.length;
+  renderLessonNav();
+  $("lesson-picker-current").textContent = ` · ${state.lesson.title}`;
+  // On a narrow screen the lesson list folds away once a lesson is chosen.
+  $("lesson-picker").open = window.matchMedia("(min-width: 1001px)").matches;
+  renderMastery(state.mastery);
+  show("lesson-view");
+}
+
+function startPractice() {
+  state.done = 0;
+  loadNextProblem();
 }
 
 // ---------- skills panel ----------
 
 function renderMastery(mastery, activeName = null) {
   state.mastery = mastery;
-  $("mastery").replaceChildren(
-    ...mastery.map((skill) => {
+  const inLesson = new Set(state.lesson ? state.lesson.skills : []);
+  const row = (skill) => {
       const level = levelOf(skill);
       const classes = ["skill-row"];
       if (skill.mastered) classes.push("mastered");
@@ -176,19 +296,42 @@ function renderMastery(mastery, activeName = null) {
         ),
         el("div", { class: "bar", "aria-hidden": "true" }, bar),
       );
-    }),
-  );
+  };
+  $("mastery-lesson").replaceChildren(...mastery.filter((s) => inLesson.has(s.id)).map(row));
+  $("mastery").replaceChildren(...mastery.filter((s) => !inLesson.has(s.id)).map(row));
+  if (state.lesson) renderLessonNav(); // a lesson's ✓ can change after any answer
 }
 
-// ---------- next problems ----------
+// ---------- the next problem ----------
 
-async function loadNext() {
+async function loadNextProblem() {
+  if (state.loading) return; // a double click must not ask twice
+  state.loading = true;
   try {
-    const next = await api("/api/next", { nickname: state.nickname });
-    renderPicks(next.picks);
-  } catch (error) {
-    showError("Could not get your next problems. Try again in a moment.");
+    await fetchNextProblem();
+  } finally {
+    state.loading = false; // only once the problem is open (or failed)
   }
+}
+
+async function fetchNextProblem() {
+  const lessonId = state.lesson.id;
+  let next;
+  try {
+    next = await api("/api/lesson/next", { nickname: state.nickname, lesson_id: lessonId });
+  } catch (error) {
+    showError("Could not get your next problem. Try again in a moment.");
+    return;
+  }
+  if (state.lesson.id !== lessonId) return; // the student opened another lesson meanwhile
+  if (!next.pick) {
+    const did = state.done ? `You did ${state.done} problem${state.done === 1 ? "" : "s"}. ` : "";
+    $("done-line").textContent = `${did}That's all the fresh practice for this lesson today. Come back tomorrow, or try another lesson.`;
+    $("next-lesson").hidden = !nextLesson();
+    show("done-view");
+    return;
+  }
+  await startProblem(next.pick);
 }
 
 function pickTags(pick) {
@@ -197,6 +340,9 @@ function pickTags(pick) {
     { class: "pick-tags" },
     el("span", { class: pick.is_follow_up ? "chip follow" : "chip", text: RULE_LABELS[pick.rule] || pick.rule }),
     el("span", { class: `chip ${pick.challenge}`, text: CHALLENGE_WORDS[pick.challenge] }),
+    state.lesson.skills.includes(pick.skill_id)
+      ? null
+      : el("span", { class: "chip", text: "From another lesson" }),
   );
 }
 
@@ -211,42 +357,19 @@ function missedBox(pick) {
   );
 }
 
-function renderPicks(picks) {
-  const cards = picks.map((pick, index) =>
-    el(
-      "article",
-      { class: `card pick${index === 0 ? " first" : ""}` },
-      pickTags(pick),
-      el("div", { class: "pick-title", text: pick.title }),
-      el("p", { class: "pick-reason", text: pick.reason }),
-      missedBox(pick),
-      el(
-        "div",
-        { class: "actions" },
-        el("button", {
-          class: index === 0 ? "btn primary" : "btn",
-          type: "button",
-          text: index === 0 ? "Start" : "Do this one instead",
-          onclick: () => startProblem(pick),
-        }),
-      ),
-    ),
-  );
-  $("picks").replaceChildren(...cards);
-  if (!picks.length) $("picks").append(el("p", { text: "No problems left to pick." }));
-  renderMastery(state.mastery);
-  show("next-view");
-}
-
 // ---------- working a problem ----------
 
 async function startProblem(pick) {
+  const lessonId = state.lesson.id;
+  let problem;
   try {
-    state.problem = await api(`/api/problems/${encodeURIComponent(pick.problem_id)}`);
+    problem = await api(`/api/problems/${encodeURIComponent(pick.problem_id)}`);
   } catch (error) {
     showError("Could not open that problem. Try again in a moment.");
     return;
   }
+  if (state.lesson.id !== lessonId) return; // the student opened another lesson meanwhile
+  state.problem = problem;
   $("page-error").hidden = true;
   state.pick = pick;
   state.stepIndex = 0;
@@ -254,13 +377,14 @@ async function startProblem(pick) {
   state.levelsBefore = Object.fromEntries(
     state.mastery.map((s) => [s.name, { level: levelOf(s), mastery: s.mastery }]),
   );
+  $("practice-count").textContent = `${state.lesson.title} · problem ${state.done + 1}`;
   $("problem-title").textContent = state.problem.title;
   $("problem-level").textContent = LEVELS[state.problem.difficulty];
   $("problem-prompt").textContent = state.problem.prompt;
   const banner = [pickTags(pick), el("p", { class: "why-plain", text: pick.reason }), missedBox(pick)];
   $("why-banner").replaceChildren(...banner.filter(Boolean)); // no missed step: no box
+  show("problem-view"); // first, so the first answer box can take the keyboard
   startStep();
-  show("problem-view");
 }
 
 function startStep() {
@@ -462,7 +586,7 @@ async function onCheck(event, step) {
     });
   } catch (error) {
     const message = error.status === 409
-      ? "This step was already saved. Go back to Up next and open the problem again."
+      ? "This step was already saved. Go back to the lesson and start practice again."
       : "Could not reach the practice engine. Try Check again.";
     setFeedback(form, "retype", message);
     return;
@@ -542,6 +666,7 @@ function endStep(form, className, ...message) {
 // ---------- after a problem ----------
 
 function finishProblem() {
+  state.done += 1;
   const right = state.results.filter((r) => r.firstTryRight).length;
   const total = state.problem.steps.length;
   $("summary-title").textContent = `${state.problem.title}: done`;

@@ -1514,5 +1514,157 @@
         }
       ]
     }
+  ],
+  "units": [
+    {
+      "title": "Unit 2 · Force and Translational Dynamics",
+      "lessons": [
+        {
+          "id": "2_1_center_of_mass",
+          "title": "2.1 Systems and Center of Mass",
+          "skills": [
+            "center_of_mass"
+          ],
+          "notes": [
+            "A system is the set of objects you choose to study; forces between them are internal.",
+            "Center of mass: x_cm = Σmx / Σm for separate masses, x_cm = (∫x λ dx) / M for a rod.",
+            "Internal forces never move the center of mass. With no outside force, it stays put or keeps a steady velocity."
+          ]
+        },
+        {
+          "id": "2_5_newtons_second_law",
+          "title": "2.5 Newton's Second Law (with 2.7 Friction)",
+          "skills": [
+            "newtons_laws"
+          ],
+          "notes": [
+            "Net force equals mass times acceleration: ΣF = ma, in each direction separately.",
+            "Balanced forces (ΣF = 0) mean constant velocity, including at rest.",
+            "Kinetic friction is f = μN, pointing against the sliding."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Unit 3 · Work, Energy, and Power",
+      "lessons": [
+        {
+          "id": "3_1_kinetic_energy",
+          "title": "3.1 Translational Kinetic Energy",
+          "skills": [
+            "kinetic_energy"
+          ],
+          "notes": [
+            "Kinetic energy is the energy of motion: K = ½mv².",
+            "It is never negative, and doubling the speed makes it four times as big."
+          ]
+        },
+        {
+          "id": "3_2_work",
+          "title": "3.2 Work",
+          "skills": [
+            "work_constant_force",
+            "work_variable_force",
+            "work_energy_theorem"
+          ],
+          "notes": [
+            "Constant force: W = Fd cos θ. It is negative when the force points against the motion.",
+            "Changing force: W = ∫F dx, the area under the force-position graph.",
+            "Work-energy theorem: the net work on an object equals its change in kinetic energy, ΣW = ΔK."
+          ]
+        },
+        {
+          "id": "3_3_potential_energy",
+          "title": "3.3 Potential Energy",
+          "skills": [
+            "potential_energy",
+            "force_from_potential"
+          ],
+          "notes": [
+            "Near Earth, gravitational potential energy changes by ΔU = mgΔy.",
+            "A spring stretched or squeezed by x stores U = ½kx².",
+            "Force from potential energy: F = −dU/dx. Where U has a minimum, the balance is stable."
+          ]
+        },
+        {
+          "id": "3_4_conservation_of_energy",
+          "title": "3.4 Conservation of Energy",
+          "skills": [
+            "energy_conservation",
+            "nonconservative_work"
+          ],
+          "notes": [
+            "With only gravity and springs doing work, K + U stays the same.",
+            "Friction takes energy out: K₁ + U₁ + W_friction = K₂ + U₂, where W_friction is negative."
+          ]
+        },
+        {
+          "id": "3_5_power",
+          "title": "3.5 Power",
+          "skills": [
+            "power"
+          ],
+          "notes": [
+            "Power is how fast energy is transferred: P = ΔE/Δt on average.",
+            "At an instant, P = Fv for a force along the velocity."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Unit 4 · Linear Momentum",
+      "lessons": [
+        {
+          "id": "4_1_momentum_and_impulse",
+          "title": "4.1–4.2 Linear Momentum, Change in Momentum and Impulse",
+          "skills": [
+            "momentum_impulse"
+          ],
+          "notes": [
+            "Momentum is p = mv, a vector: its sign shows its direction.",
+            "Impulse is J = ∫F dt, the area under a force-time graph, and it equals the change in momentum, Δp."
+          ]
+        },
+        {
+          "id": "4_3_conservation_of_momentum",
+          "title": "4.3 Conservation of Linear Momentum",
+          "skills": [
+            "momentum_conservation"
+          ],
+          "notes": [
+            "With no net outside force, a system's total momentum stays the same.",
+            "Use it in collisions and explosions: total p before = total p after."
+          ]
+        },
+        {
+          "id": "4_4_collisions",
+          "title": "4.4 Elastic and Inelastic Collisions",
+          "skills": [
+            "collision_types",
+            "multi_stage"
+          ],
+          "notes": [
+            "Elastic: kinetic energy is also kept. Inelastic: some is lost; when objects stick, the most is lost.",
+            "Split a problem into stages: momentum during the quick collision, energy before or after it."
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Unit 6 · Energy and Momentum of Rotating Systems",
+      "lessons": [
+        {
+          "id": "6_6_orbiting_satellites",
+          "title": "6.6 Motion of Orbiting Satellites",
+          "skills": [
+            "gravitational_energy"
+          ],
+          "notes": [
+            "Far from Earth, gravitational potential energy is U = −GMm/r, zero infinitely far away.",
+            "An object escapes if its total energy K + U is zero or more: v_escape = √(2GM/r)."
+          ]
+        }
+      ]
+    }
   ]
 }

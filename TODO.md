@@ -6,6 +6,7 @@
 
 - [ ] **T4 Practice page in a Grassroot mock.** A web page that looks like Grassroot, with everything fake except practice. The student answers each step, gets the T1c check and a hint on a miss (decide here whether they get a second try), and sees mastery per skill. When a problem is a follow-up, the page shows it clearly (for example a "Picked for you" tag naming the skill and the step that went wrong). Jonathon tries it and redesigns until it feels right. **Done when:** Jonathon can do three problems from first step to last, and each follow-up's reason is visible and makes sense to Jonathon.
   - Built 2026-11-26: run `uvicorn practice_engine.api:app --reload` and open http://127.0.0.1:8000. A wrong first try gets why it is wrong and a hint, then one more try; a wrong second try shows the answer (Jonathon, 2026-11-26). Next: Jonathon does three problems and says what to change.
+  - Changed 2026-11-26 (Jonathon): lessons from the course file, following the College Board's units and topics, then practice on that lesson one problem at a time (mostly the lesson, follow-ups first, a review about 1 in 4). Next: problem variants, so a skill comes back with new numbers instead of the exact same problem.
 
 ## Next
 

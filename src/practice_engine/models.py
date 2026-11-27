@@ -2,8 +2,10 @@
 
 A course is data, not code: a list of skills and a list of problems, each problem
 with a short title and made of steps, each step tagged with one skill. A choice
-step also says, for each wrong option, why it is wrong. This file describes those
-shapes and offers two helpers:
+step also says, for each wrong option, why it is wrong. A course may also list its
+units, each a list of lessons, and the skills each lesson teaches, following the
+course's own curriculum (for AP courses, the College Board's units and topics).
+This file describes those shapes and offers two helpers:
 
 - load_course(path): read a course.json file into the shapes below. A file that is
   not valid JSON, or has a missing, misspelled or wrongly typed field, stops here
@@ -105,13 +107,38 @@ class Problem(CourseShape):
     steps: list[Step]
 
 
+class Lesson(CourseShape):
+    """One lesson of a unit, such as "3.2 Work", and the skills it teaches.
+
+    `notes` are a few short lines the page shows as the lesson (a stand-in for the
+    real lesson material, which is not this project's job). A skill used everywhere,
+    such as "which idea fits?", may belong to no lesson.
+    """
+
+    id: str
+    title: str
+    skills: list[str]
+    notes: list[str] = []
+
+
+class Unit(CourseShape):
+    """One unit of the course, such as "Unit 3 · Work, Energy, and Power"."""
+
+    title: str
+    lessons: list[Lesson]
+
+
 class Course(CourseShape):
-    """A whole course: its skills, which skill depends on which, and its problems."""
+    """A whole course: its skills, which skill depends on which, and its problems.
+
+    `units` may be left out; a course without units is practiced as one whole.
+    """
 
     id: str
     title: str
     skills: list[Skill]
     problems: list[Problem]
+    units: list[Unit] = []
 
 
 def load_course(path: str | Path) -> Course:
@@ -194,6 +221,63 @@ def validate_course(course: Course) -> list[str]:
     complaints += _check_prerequisites_have_no_loop(course)
     complaints += _check_every_skill_is_used(course)
     complaints += _check_problems_and_steps(course)
+    complaints += _check_units(course)
+    return complaints
+
+
+def _check_units(course: Course) -> list[str]:
+    """Units and lessons need titles and at least one lesson or skill; lesson ids are
+    well formed and used once; every lesson skill is in the course, and a skill
+    belongs to at most one lesson."""
+    skill_ids = {skill.id for skill in course.skills}
+    # Skills with a step in every problem (with 2 or more problems) are practiced
+    # everywhere, so a lesson of only those has nothing of its own to practice.
+    everywhere: set[str] = set()
+    if len(course.problems) >= 2:
+        everywhere = set.intersection(
+            *({step.skill for step in problem.steps} for problem in course.problems)
+        )
+    complaints = []
+    seen_lessons: set[str] = set()
+    lesson_of: dict[str, str] = {}  # skill id -> the lesson that teaches it
+    for number, unit in enumerate(course.units, start=1):
+        if not unit.title.strip():
+            complaints.append(f"Unit {number} has an empty title.")
+        if not unit.lessons:
+            complaints.append(f"Unit {number} has no lessons.")
+        for lesson in unit.lessons:
+            where = f"Lesson '{lesson.id}'"
+            if not ID_PATTERN.fullmatch(lesson.id):
+                complaints.append(
+                    f"Lesson id '{lesson.id}' must be lowercase words or digits joined by "
+                    "underscores, like '3_2_work'."
+                )
+            if lesson.id in seen_lessons:
+                complaints.append(f"Lesson id '{lesson.id}' is used more than once.")
+            seen_lessons.add(lesson.id)
+            if not lesson.title.strip():
+                complaints.append(f"{where} has an empty title.")
+            if not lesson.skills:
+                complaints.append(f"{where} teaches no skills.")
+            elif set(lesson.skills) <= everywhere:
+                complaints.append(
+                    f"{where} only teaches skills used in every problem, so it has nothing "
+                    "of its own to practice."
+                )
+            if any(not note.strip() for note in lesson.notes):
+                complaints.append(f"{where} has an empty note.")
+            for skill_id in lesson.skills:
+                if skill_id not in skill_ids:
+                    complaints.append(
+                        f"{where} lists a skill '{skill_id}' that is not in the course."
+                    )
+                elif skill_id in lesson_of:
+                    complaints.append(
+                        f"Skill '{skill_id}' is in two lessons: '{lesson_of[skill_id]}' "
+                        f"and '{lesson.id}'."
+                    )
+                else:
+                    lesson_of[skill_id] = lesson.id
     return complaints
 
 

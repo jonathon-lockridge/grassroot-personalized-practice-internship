@@ -2,12 +2,15 @@
 
 One main helper:
 
-- next_problems(course, state, history, now, count=3): a list of up to `count`
-  picks. Each pick names a problem, the skill it is meant to practice, one plain
+- next_problems(course, state, history, now, count=3, focus=None): a list of up to
+  `count` picks. Each pick names a problem, the skill it is meant to practice, one plain
   sentence telling the student why it was picked, and `rule`: a short fixed word
   saying which rule below made the pick (one of PICK_RULES), for checking and
   counting the engine's choices, and `challenge`: "solid" or "stretch" (see "Solid
   and stretch" below), so the page can show how hard a pick is predicted to be.
+- next_problem(course, state, history, now, focus): the one next problem for a
+  student practicing one lesson (`focus` is its skills), or None when the lesson has
+  nothing left for today. See "Practicing one lesson" below.
 
 Only a step's first try counts as evidence here, as in mastery.py: a second try says
 little about what the student knew (research report, change 1). A wrong first try
@@ -127,6 +130,22 @@ Throughout:
   interleaving; Stanford review, 2026-11-22).
 - No problem the student answered any step of in the last 24 hours.
 
+Practicing one lesson (`focus`, decided 2026-11-26): after a lesson, practice is
+mostly on that lesson's skills, but not only, so earlier skills are not forgotten.
+next_problem gives one problem at a time, in this order: a follow-up for a missed step
+from any lesson; then, after LESSON_RUN problems in a row only on the lesson, a review
+or partway skill from outside it (so about 1 problem in 4 or more practices an earlier
+skill, since many problems already mix one in; never a new skill, as it has not been
+taught yet); then the lesson's new skills, its weakest partway skill, its reviews,
+and any of its skills. The lesson's skills count as ready (it has just taught them),
+but a miss still steps down to a weak prerequisite, and skills outside the lesson keep
+the usual readiness rule. A follow-up already right once since its miss stops jumping
+the queue until WATCH_LATER_HOURS after the miss, when a right answer can clear it;
+more follow-ups minutes later are massed practice. A problem answered in the last
+REPEAT_HOURS hours is never offered: when nothing fresh is left on the lesson, it is
+done for today, instead of drifting into other lessons. next_problems with `focus`
+puts the lesson's skills first within each rule, for a batch.
+
 When no problem fits a skill, the rules are loosened for that skill in this order:
 any predicted success (first below the 70 to 85 percent target, then below
 SUCCESS_FLOOR), then problems seen before, then problems seen in the last 24 hours
@@ -197,6 +216,9 @@ WATCH_CLEAR_RIGHTS = 2
 # learned, while getting it right minutes after the feedback may be short-term memory
 # (Jonathon, 2026-11-26).
 WATCH_LATER_HOURS = 12
+# When practicing one lesson, after this many problems in a row only on the lesson, the
+# next is a review from outside it, if one is due: about 1 in 4 (Jonathon, 2026-11-26).
+LESSON_RUN = 3
 
 # The rule that made a pick, one short fixed word each (see the list at the top).
 # `Literal` means a Pick may hold only one of these words; any other is refused.
@@ -248,8 +270,12 @@ def next_problems(
     history: list[StepAnswer],
     now: datetime,
     count: int = 3,
+    focus: set[str] | None = None,
 ) -> list[Pick]:
     """Up to `count` next problems for the student, most important first.
+
+    `focus`, if given, is the skills of the lesson being practiced: they go first
+    within each rule (see "Practicing one lesson" at the top).
 
     `history` is the step answers of this student (answers by other students are
     ignored), and `now` is the current date and time (passed in so that tests can
@@ -258,6 +284,21 @@ def next_problems(
     Stops with a ValueError if the state is for a different course, or if the times
     mix ones with a time zone and ones without (they cannot be compared).
     """
+    history, skill_of_step = _own_history(course, state, history, now)
+    focus = focus or None  # an empty set means no lesson: the whole course
+    if not history:
+        return _starting_check(course, state, count, focus)
+
+    selector = _Selector(course, state, history, now, skill_of_step, focus)
+    return _fill_batch(selector, count)
+
+
+def _own_history(
+    course: Course, state: MasteryState, history: list[StepAnswer], now: datetime
+) -> tuple[list[StepAnswer], dict[tuple[str, int], str]]:
+    """This student's answers to steps of this course, oldest first, and a look-up
+    table (problem id, step position) -> the skill of that step. Stops with a
+    ValueError if the state is for another course or the times cannot be compared."""
     if state.course_id != course.id:
         raise ValueError(
             f"The mastery state for '{state.nickname}' is for course '{state.course_id}', "
@@ -279,11 +320,11 @@ def next_problems(
             "without, so they cannot be compared."
         )
     # Oldest first. sorted() keeps answers with the same time in the order they were given.
-    history = sorted(history, key=lambda answer: answer.answered_at)
-    if not history:
-        return _starting_check(course, state, count)
+    return sorted(history, key=lambda answer: answer.answered_at), skill_of_step
 
-    selector = _Selector(course, state, history, now, skill_of_step)
+
+def _fill_batch(selector: "_Selector", count: int) -> list[Pick]:
+    """Rules 2 to 5 and the mixing rules, for a student with answers (see the top)."""
     picks: list[Pick] = []
     # Each skill gets its own loosening (built into best_problem; see _fit for the
     # order) before the next skill is tried, so a less important skill never pushes a
@@ -301,31 +342,33 @@ def next_problems(
     waiting = {target.skill for target in follow_ups}
     groups: list[list[_Target]] = []  # the candidates for the mixing place, best group first
     if count >= 3 or (picks and count >= 2):
-        groups.append(new)
+        groups.append(selector.focus_first(new))
     if picks and count >= 2:
-        groups.append([target for target in reviews if target.skill not in waiting])
-        groups.append([target for target in partway if target.skill not in waiting])
+        groups.append(selector.focus_first([t for t in reviews if t.skill not in waiting]))
+        groups.append(selector.focus_first([t for t in partway if t.skill not in waiting]))
     mixing = [target for group in groups for target in group]
     # The place is for the best group that has any skill in it.
     wanted = next(({target.skill for target in group} for group in groups if group), set())
 
     # Rules 3 to 5, leaving the last place free for mixing if it is still needed.
     places = min(count, MAX_BATCH_SKILLS)  # each pick here is for a skill of its own
-    rest = partway + reviews + new
+    rest = selector.focus_first(partway + reviews + new)
     if mixing:
         _add_picks(selector, picks, rest, limit=places - 1, count=count)
         if not any(not pick.is_follow_up and pick.target_skill in wanted for pick in picks):
             _add_picks(selector, picks, mixing, limit=len(picks) + 1, count=count)
     _add_picks(selector, picks, rest, limit=count, count=count)
     # The last loosening: any skill, still one pick per skill.
-    _add_picks(selector, picks, selector.any_skill(), limit=count, count=count)
+    _add_picks(
+        selector, picks, selector.focus_first(selector.any_skill()), limit=count, count=count
+    )
     # Still short (a course with few skills, or a large `count`): now a skill may fill
     # more than one place, as long as each problem appears only once and, when there
     # is a choice, two picks in a row practice different skills.
     while len(picks) < count:
         batch_skills = {pick.target_skill for pick in picks}
         options = []  # (target, problem) pairs that could fill the next place
-        for target in selector.any_skill():
+        for target in selector.focus_first(selector.any_skill()):
             if len(batch_skills) >= MAX_BATCH_SKILLS and target.skill not in batch_skills:
                 continue  # the batch already has its three skills
             challenge = _challenge(target, picks, count)
@@ -422,7 +465,83 @@ def _make_pick(target: _Target, problem: Problem, challenge: Challenge, share: f
     )
 
 
-def _starting_check(course: Course, state: MasteryState, count: int) -> list[Pick]:
+def next_problem(
+    course: Course,
+    state: MasteryState,
+    history: list[StepAnswer],
+    now: datetime,
+    focus: set[str] | None = None,
+) -> Pick | None:
+    """The one next problem for a student practicing one lesson, whose skills are
+    `focus` (None: the whole course), or None when nothing fresh is left today (see
+    "Practicing one lesson" at the top). Never a problem answered in the last
+    REPEAT_HOURS hours. Stops with a ValueError as next_problems does."""
+    history, skill_of_step = _own_history(course, state, history, now)
+    if focus is not None:
+        # A lesson of only skills used everywhere keeps them; otherwise they go.
+        focus = set(focus) - _skills_in_every_problem(course) or set(focus)
+    if not history:
+        picks = _starting_check(course, state, 1, focus)
+        return picks[0] if picks else None
+    selector = _Selector(course, state, history, now, skill_of_step, focus)
+
+    def on_lesson(target: _Target) -> bool:
+        return focus is None or target.skill in focus
+
+    def first_fresh(targets: list[_Target]) -> Pick | None:
+        """A pick for the first target with a problem not answered in the last day. A
+        follow-up or a stuck skill's easiest problem looks for solid (a success soon
+        after a miss helps it stick); the rest look for stretch."""
+        for target in targets:
+            challenge: Challenge = "solid" if target.missed_step or target.easiest else "stretch"
+            problem = selector.best_problem(target, [], challenge, exclude=selector.recent)
+            if problem is not None:
+                return _make_pick(target, problem, challenge, selector.success(problem))
+        return None
+
+    # 1. A follow-up, from any lesson: a missed step comes first.
+    pick = first_fresh(selector.follow_ups())
+    if pick is not None:
+        return pick
+    # 2. After LESSON_RUN lesson problems in a row, a review or partway skill from
+    #    outside the lesson, never a new one: the student has not been taught it yet.
+    if focus is not None and _lesson_run(course, history, focus) >= LESSON_RUN:
+        outside = [t for t in selector.reviews() + selector.partway() if not on_lesson(t)]
+        pick = first_fresh(outside)
+        if pick is not None:
+            return pick
+    # 3. The lesson: its new skills first, so the whole lesson gets started, then the
+    #    weakest partway skill, then reviews, then any of its skills at all.
+    lesson = [t for t in selector.new() + selector.partway() + selector.reviews() if on_lesson(t)]
+    lesson += [t for t in selector.any_skill() if on_lesson(t)]
+    # Nothing fresh on the lesson: done for today, rather than drifting into other lessons.
+    return first_fresh(lesson)
+
+
+def _lesson_run(course: Course, history: list[StepAnswer], focus: set[str]) -> int:
+    """How many of the student's latest problems in a row were only on `focus`: every
+    step on a lesson skill (or a skill used everywhere). A problem that also has a step
+    on an earlier skill already practiced that skill, so it ends the run."""
+    everywhere = _skills_in_every_problem(course)
+    skills_of = {
+        problem.id: {step.skill for step in problem.steps} - everywhere
+        for problem in course.problems
+    }
+    latest_first: list[str] = []  # problem ids, most recently answered first, once each
+    for answer in sorted(history, key=lambda answer: answer.answered_at, reverse=True):
+        if answer.problem_id in skills_of and answer.problem_id not in latest_first:
+            latest_first.append(answer.problem_id)
+    run = 0
+    for problem_id in latest_first:
+        if not skills_of[problem_id] <= focus:
+            break
+        run += 1
+    return run
+
+
+def _starting_check(
+    course: Course, state: MasteryState, count: int, focus: set[str] | None = None
+) -> list[Pick]:
     """Rule 1: a short set for a new student, covering as many skills as it can.
 
     Each round takes the problem that covers the most not-yet-covered skills with
@@ -431,10 +550,19 @@ def _starting_check(course: Course, state: MasteryState, count: int) -> list[Pic
     no problem adds a skill. Each pick looks for solid (easiest first), but says solid
     only if `state` predicts it at least the low end of TARGET_SUCCESS right (see
     _label); for a brand-new student that is rarely so.
+
+    With `focus` (a lesson's skills), only problems with a step on the lesson count,
+    and only the lesson's skills are covered: the check is on what was just taught.
     """
     starting_skills = {skill.id for skill in course.skills if not skill.prerequisites}
     # A skill in every problem gets checked anyway, so it counts as covered from the start.
     covered: set[str] = _skills_in_every_problem(course)
+    if focus:
+        starting_skills &= focus
+        # Skills outside the lesson count as covered, so only the lesson's are sought.
+        covered |= {skill.id for skill in course.skills if skill.id not in focus}
+        if focus <= covered:
+            covered -= focus  # a lesson of only "everywhere" skills: check those
     picks: list[Pick] = []
     while len(picks) < count:
         best: Problem | None = None
@@ -486,8 +614,10 @@ class _Selector:
         history: list[StepAnswer],
         now: datetime,
         skill_of_step: dict[tuple[str, int], str],
+        focus: set[str] | None = None,
     ) -> None:
         self.course = course
+        self.focus = focus  # the skills of the lesson being practiced, or None
         self.state = state
         self.now = now
         self.skill_of_step = skill_of_step
@@ -529,6 +659,29 @@ class _Selector:
             for problem in course.problems
         }
 
+    def focus_first(self, targets: list["_Target"]) -> list["_Target"]:
+        """With a lesson being practiced, its skills first, keeping each side's order.
+        The lesson also goes into each target's rank, so the mixing tiebreak in
+        _add_picks never puts a skill outside the lesson ahead of one inside it."""
+        if self.focus is None:
+            return targets
+        marked = [
+            target
+            if target.rank is None
+            else target.model_copy(update={"rank": (target.skill not in self.focus, *target.rank)})
+            for target in targets
+        ]
+        return sorted(marked, key=lambda target: target.skill not in self.focus)
+
+    def resting(self, miss: StepAnswer, rights_since: int) -> bool:
+        """Practicing one lesson: a watched skill already right once since its miss
+        stops jumping the queue as a follow-up until WATCH_LATER_HOURS after the miss,
+        when a right answer can clear it. It can still come as an ordinary lesson skill."""
+        if self.focus is None or rights_since < 1:
+            return False
+        later = miss.answered_at.astimezone(UTC) + timedelta(hours=WATCH_LATER_HOURS)
+        return self.now.astimezone(UTC) < later
+
     def previous_problem(self, picks: list[Pick]) -> Problem:
         """The problem just before the next place: the batch's last pick, or else the
         problem the student answered last."""
@@ -541,6 +694,12 @@ class _Selector:
     def skill_of(self, answer: StepAnswer) -> str:
         """The skill of the step `answer` is for."""
         return self.skill_of_step[(answer.problem_id, answer.step_position)]
+
+    def can_start(self, skill_id: str) -> bool:
+        """Ready, or taught by the lesson being practiced: a lesson has just taught its
+        skills, so they are practiced even before everything they build on is known well.
+        A miss still steps down to a weak prerequisite (see _follow_up_target)."""
+        return (self.focus is not None and skill_id in self.focus) or self.is_ready(skill_id)
 
     def is_ready(self, skill_id: str) -> bool:
         """Every prerequisite is at READY_MASTERY or above (always true if switched off)."""
@@ -588,6 +747,8 @@ class _Selector:
         watched = sorted(watched, key=lambda item: self.skill_of(item[0]) in self.everywhere)
         targets: list[_Target] = []
         for answer, rights_since in watched:
+            if self.resting(answer, rights_since):
+                continue
             taken = {target.skill for target in targets}
             target = self._follow_up_target(answer, self.skill_of(answer), taken, rights_since)
             # Two misses can lead to the same skill (say, a shared prerequisite): keep one.
@@ -717,7 +878,7 @@ class _Selector:
             for skill in self.course.skills
             if self.tries_of[skill.id]
             and not self.mastered[skill.id]
-            and self.is_ready(skill.id)
+            and self.can_start(skill.id)
             and skill.id not in self.everywhere
         ]
         # sorted() keeps course order among skills with the same mastery.
@@ -825,7 +986,7 @@ class _Selector:
             )
             for skill in self.course.skills
             if not self.tries_of[skill.id]
-            and self.is_ready(skill.id)
+            and self.can_start(skill.id)
             and skill.id not in self.everywhere
         ]
 
@@ -834,7 +995,7 @@ class _Selector:
         # Sort by "not ready" (False comes before True), then by mastery.
         skills = sorted(
             (skill.id for skill in self.course.skills if skill.id not in self.everywhere),
-            key=lambda skill_id: (not self.is_ready(skill_id), self.mastery[skill_id]),
+            key=lambda skill_id: (not self.can_start(skill_id), self.mastery[skill_id]),
         )
         targets = []
         for skill_id in skills:
@@ -843,7 +1004,7 @@ class _Selector:
                 reason = f"More practice with {name}."
             else:
                 reason = f"This problem starts you on {name}."
-            rank = ("relaxed", not self.is_ready(skill_id), self.mastery[skill_id])
+            rank = ("relaxed", not self.can_start(skill_id), self.mastery[skill_id])
             targets.append(_Target(skill=skill_id, reason=reason, rule="relaxed", rank=rank))
         return targets
 
@@ -863,14 +1024,18 @@ class _Selector:
         left = sum(
             1 - self.mastery[step.skill]
             for step in steps
-            if step.skill == target_skill or self.is_ready(step.skill)
+            if step.skill == target_skill or self.can_start(step.skill)
         ) / len(steps)
         # Rounded, so two problems whose numbers differ only by computer rounding
         # still count as a tie and the later items decide.
         return round(left, 6)
 
     def best_problem(
-        self, target: _Target, picks: list[Pick], challenge: Challenge = "stretch"
+        self,
+        target: _Target,
+        picks: list[Pick],
+        challenge: Challenge = "stretch",
+        exclude: set[str] | frozenset[str] = frozenset(),
     ) -> Problem | None:
         """The best problem with a step on the target skill not already in `picks`, or None.
 
@@ -880,12 +1045,14 @@ class _Selector:
         most left to learn wins, before TARGET_SUCCESS. For a "solid" `challenge`,
         TARGET_SUCCESS comes before the most left to learn instead.
         For a stuck target with nothing to step back to (`easiest`), the success target
-        is not used: the lowest difficulty wins, then an unseen problem.
+        is not used: the lowest difficulty wins, then an unseen problem. Problem ids in
+        `exclude` are never chosen.
         """
         candidates = [
             problem
             for problem in self.course.problems
-            if not any(pick.problem_id == problem.id for pick in picks)
+            if problem.id not in exclude
+            and not any(pick.problem_id == problem.id for pick in picks)
             and any(step.skill == target.skill for step in problem.steps)
         ]
         if not candidates:

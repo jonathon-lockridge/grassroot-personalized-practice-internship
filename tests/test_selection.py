@@ -43,6 +43,7 @@ from practice_engine.selection import (
     WATCH_LATER_HOURS,
     MissedStep,
     Pick,
+    next_problem,
     next_problems,
     skill_families,
 )
@@ -2031,3 +2032,183 @@ def test_a_batch_of_one_is_stretch() -> None:
     assert picks[0].is_follow_up is True
     assert picks[0].challenge == "stretch"
     assert ids(picks) == ["p_a"]
+
+
+# Practicing one lesson (next_problem with a focus, decided 2026-11-26). The tiny
+# course has two lessons: {a, b} and {c, d}, and nothing needs anything before it.
+
+
+def lesson_course() -> Course:
+    return tiny_course(
+        {"a": [], "b": [], "c": [], "d": []},
+        [
+            ("pa1", 1, ["a"]),
+            ("pa2", 1, ["a"]),
+            ("pb1", 1, ["b"]),
+            ("pc1", 1, ["c"]),
+            ("pc2", 1, ["c"]),
+            ("pc3", 1, ["c"]),
+            ("pd1", 1, ["d"]),
+        ],
+    )
+
+
+LESSON = {"c", "d"}
+MID = {"a": START_MASTERY, "b": START_MASTERY, "c": 0.5, "d": START_MASTERY}
+
+
+def test_a_new_student_starts_a_lesson_on_that_lessons_skills() -> None:
+    pick = next_problem(lesson_course(), state({}), [], NOW, LESSON)
+
+    assert pick is not None
+    assert pick.target_skill in LESSON
+    assert pick.rule == "starting_check"
+
+
+def test_lesson_skills_come_before_a_due_review_from_another_lesson() -> None:
+    history = streak("pa1", LAST_WEEK)  # skill a mastered a week ago: a review is due
+
+    pick = next_problem(lesson_course(), state({**MID, "a": KNOWN}), history, NOW, LESSON)
+
+    assert pick is not None
+    assert pick.target_skill in LESSON
+
+
+def test_after_three_lesson_problems_a_due_review_from_outside_comes_next() -> None:
+    history = streak("pa1", LAST_WEEK) + [
+        answer("pc1", 1, True, NOW - timedelta(minutes=30)),
+        answer("pd1", 1, True, NOW - timedelta(minutes=20)),
+        answer("pc2", 1, True, NOW - timedelta(minutes=10)),
+    ]
+
+    pick = next_problem(lesson_course(), state({**MID, "a": KNOWN}), history, NOW, LESSON)
+
+    assert pick is not None
+    assert (pick.target_skill, pick.rule) == ("a", "review")
+    assert pick.problem_id == "pa2"  # unseen before seen
+
+
+def test_a_follow_up_comes_first_even_from_another_lesson() -> None:
+    history = [answer("pa1", 1, False, NOW - timedelta(minutes=5))]
+
+    pick = next_problem(lesson_course(), state({**MID, "a": 0.3}), history, NOW, LESSON)
+
+    assert pick is not None
+    assert pick.is_follow_up and pick.target_skill == "a"
+    assert pick.problem_id == "pa2"  # never the problem just done
+
+
+def test_a_follow_up_right_once_since_rests_until_a_later_session() -> None:
+    history = [
+        answer("pc1", 1, False, NOW - timedelta(minutes=10)),
+        answer("pc2", 1, True, NOW - timedelta(minutes=5)),
+    ]
+    course = lesson_course()
+
+    resting = next_problem(course, state(MID), history, NOW, LESSON)
+    later = next_problem(course, state(MID), history, NOW + timedelta(hours=13), LESSON)
+
+    assert resting is not None and not resting.is_follow_up
+    assert later is not None and later.is_follow_up and later.target_skill == "c"
+
+
+def test_a_lesson_never_offers_a_problem_done_today_or_an_untaught_skill() -> None:
+    history = [answer("pd1", 1, True, NOW - timedelta(minutes=5))]
+
+    pick = next_problem(lesson_course(), state(MID), history, NOW, {"d"})
+
+    # d's only problem was just done, and a, b and c were never tried (not taught yet).
+    assert pick is None
+
+
+def test_a_finished_lesson_is_done_for_today_instead_of_drifting() -> None:
+    # Skill c is partway (tried, not mastered), but lesson {d} has nothing fresh left.
+    history = [
+        answer("pc1", 1, True, NOW - timedelta(minutes=9)),
+        answer("pd1", 1, True, NOW - timedelta(minutes=5)),
+    ]
+
+    assert next_problem(lesson_course(), state(MID), history, NOW, {"d"}) is None
+
+
+def test_without_a_focus_the_batch_is_unchanged() -> None:
+    history = [answer("pc1", 1, False, NOW - timedelta(minutes=10))]
+    course = lesson_course()
+
+    assert next_problems(course, state(MID), history, NOW) == next_problems(
+        course, state(MID), history, NOW, focus=None
+    )
+
+
+def test_a_lessons_skills_are_practiced_before_their_prerequisites_are_known() -> None:
+    course = tiny_course(
+        {"e": [], "f": ["e"]}, [("pe1", 1, ["e"]), ("pf1", 1, ["f"]), ("pf2", 1, ["f"])]
+    )
+    history = [answer("pf1", 1, True, NOW - timedelta(minutes=5))]
+    student = state({"e": START_MASTERY, "f": 0.4})
+
+    pick = next_problem(course, student, history, NOW, {"f"})
+
+    # e is far from ready, but the lesson has just taught f, so f is practiced.
+    assert pick is not None and pick.problem_id == "pf2"
+
+
+def test_a_lesson_skill_is_not_crowded_out_by_follow_ups_with_nothing_fresh() -> None:
+    # Review finding, 2026-11-26: a batch of 3 filled with stale follow-ups ended the
+    # lesson while one of its problems was still fresh.
+    history = [
+        answer("pc1", 1, False, NOW - timedelta(minutes=40)),
+        answer("pb1", 1, False, NOW - timedelta(minutes=30)),
+        answer("pa1", 1, False, NOW - timedelta(minutes=20)),
+        answer("pa2", 1, False, NOW - timedelta(minutes=10)),
+    ]
+
+    pick = next_problem(lesson_course(), state(MID), history, NOW, LESSON)
+
+    assert pick is not None and (pick.problem_id, pick.target_skill) == ("pc2", "c")
+
+
+def test_the_whole_course_keeps_the_readiness_rule() -> None:
+    course = tiny_course(
+        {"e": [], "f": ["e"]}, [("pe1", 1, ["e"]), ("pe2", 1, ["e"]), ("pf1", 1, ["f"])]
+    )
+    history = [answer("pe1", 1, True, NOW - timedelta(minutes=5))]
+
+    pick = next_problem(course, state({"e": 0.4, "f": START_MASTERY}), history, NOW, None)
+
+    # f builds on e, which is far from ready, so e is practiced, not f.
+    assert pick is not None and pick.problem_id == "pe2"
+
+
+def test_one_problem_at_a_time_refuses_mixed_time_zones_plainly() -> None:
+    history = [answer("pc1", 1, True, NOW - timedelta(minutes=5))]  # no time zone
+
+    with pytest.raises(ValueError, match="time zone"):
+        next_problem(lesson_course(), state(MID), history, NOW.replace(tzinfo=UTC), LESSON)
+
+
+def test_a_problem_that_mixes_in_an_earlier_skill_ends_the_lesson_run() -> None:
+    course = tiny_course(
+        {"a": [], "c": [], "d": []},
+        [
+            ("pa1", 1, ["a"]),
+            ("pa2", 1, ["a"]),
+            ("pc1", 1, ["c"]),
+            ("pcd", 1, ["c", "d"]),
+            ("pca", 1, ["c", "a"]),
+            ("pd1", 1, ["d"]),
+            ("pd2", 1, ["d"]),
+        ],
+    )
+    history = streak("pa1", LAST_WEEK) + [
+        answer("pc1", 1, True, NOW - timedelta(minutes=30)),
+        answer("pcd", 1, True, NOW - timedelta(minutes=25)),
+        answer("pca", 1, True, NOW - timedelta(minutes=20)),  # practiced a too
+        answer("pd1", 1, True, NOW - timedelta(minutes=10)),
+    ]
+    student = state({"a": KNOWN, "c": 0.5, "d": 0.5})
+
+    pick = next_problem(course, student, history, NOW, LESSON)
+
+    # Only one problem since pca was purely on the lesson, so no outside review yet.
+    assert pick is not None and pick.target_skill in LESSON

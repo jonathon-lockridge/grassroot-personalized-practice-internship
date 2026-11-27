@@ -243,3 +243,64 @@ def test_a_course_can_also_be_built_in_code() -> None:
     course = Course(id="demo", title="Demo", skills=[], problems=[])
 
     assert validate_course(course) == ["The course has no skills.", "The course has no problems."]
+
+
+# Units and lessons (decided 2026-11-26): a course follows its own curriculum.
+
+
+def test_physics_course_lessons_follow_the_curriculum() -> None:
+    course = load_course(COURSE)
+    lesson_of = {
+        skill: lesson.title
+        for unit in course.units
+        for lesson in unit.lessons
+        for skill in lesson.skills
+    }
+
+    # Every skill but the one used in every problem is taught in exactly one lesson.
+    assert set(lesson_of) == {skill.id for skill in course.skills} - {"choose_principle"}
+    assert lesson_of["gravitational_energy"].startswith("6.6")
+    assert lesson_of["center_of_mass"].startswith("2.1")
+    assert all(lesson.notes for unit in course.units for lesson in unit.lessons)
+
+
+def test_a_course_without_units_is_still_sound() -> None:
+    course = load_course(COURSE)
+    course.units = []
+
+    assert validate_course(course) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "break_course", "expected_words"),
+    [
+        ("unknown skill", lambda c: c.units[0].lessons[0].skills.append("nope"), "'nope'"),
+        (
+            "skill in two lessons",
+            lambda c: c.units[1].lessons[0].skills.append(c.units[1].lessons[1].skills[0]),
+            "in two lessons",
+        ),
+        ("no skills", lambda c: c.units[0].lessons[0].skills.clear(), "teaches no skills"),
+        ("bad id", lambda c: setattr(c.units[0].lessons[0], "id", "2.1"), "Lesson id '2.1'"),
+        (
+            "repeated id",
+            lambda c: setattr(c.units[0].lessons[1], "id", c.units[0].lessons[0].id),
+            "used more than once",
+        ),
+        ("empty title", lambda c: setattr(c.units[0], "title", " "), "Unit 1 has an empty title"),
+        ("no lessons", lambda c: c.units[0].lessons.clear(), "Unit 1 has no lessons"),
+        ("empty note", lambda c: c.units[0].lessons[0].notes.append(""), "empty note"),
+        (
+            "only everywhere skills",
+            lambda c: setattr(c.units[0].lessons[0], "skills", ["choose_principle"]),
+            "nothing of its own",
+        ),
+    ],
+)
+def test_lesson_rules_are_enforced(name: str, break_course, expected_words: str) -> None:
+    course = load_course(COURSE)
+    break_course(course)
+
+    complaints = validate_course(course)
+
+    assert any(expected_words in complaint for complaint in complaints), (name, complaints)

@@ -8,18 +8,19 @@ Jonathon Lockridge, a high-school student and product design intern at [Grassroo
 
 Result so far: on 50 simulated students, the engine got 41 to 42 to learn every skill within 600 steps, about twice as many as a teacher's usual order (20 to 22). No real students have used it yet.
 
-Status: the engine, saved student records, the simulated-student test and a first practice page all work. Jonathon is now trying the page and redesigning it until it feels right.
+Status: the engine, saved student records, the simulated-student test and a practice page all work. On the page, a student reads a short lesson, then practices it one problem at a time. Jonathon is now trying the page and redesigning it until it feels right; problem variants (new numbers, same ideas) come next.
 
 ## The idea
 
 A right-or-wrong mark on a whole physics problem hides where it went wrong. The student might have picked the wrong principle, found the wrong force, or slipped on the last line. Here each problem is split into steps, and each step practices one skill, so a wrong step points at the skill the student is stuck on. The engine estimates what the student knows, picks the next problems from that estimate, and tells the student why it picked each one.
 
-The engine knows nothing about physics. A course is a data file of skills and problems, so a new subject means a new file and no new code. The first course is AP Physics C: Mechanics, energy and momentum, with 17 skills and 24 problems, the unit Jonathon is studying, so every problem gets judged by someone learning it.
+The engine knows nothing about physics. A course is a data file of skills, problems, and units and lessons that follow the course's own curriculum, so a new subject means a new file and no new code. A course has as many skills as its material needs. The first course is AP Physics C: Mechanics, energy and momentum, with 17 skills and 24 problems, the unit Jonathon is studying, so every problem gets judged by someone learning it.
 
 ## What Jonathon decided
 
 - **Easy and hard picks side by side.** The plan said to give problems a student should get 70 to 85% right. The first engine gave harder problems instead, because they leave more to learn. Jonathon chose to keep both: each batch has a "solid" pick near 70 to 85% and "stretch" picks that are harder but still at least half right.
 - **The test that counts uses realistic students.** Of the two kinds of simulated students, Jonathon chose the ones that need the basics before advanced skills, as real students do, as the bar the engine must pass.
+- **Practice follows the lesson.** After a lesson, practice is mostly on that lesson's skills, one problem at a time, with a follow-up first after a miss and a review from an earlier lesson about 1 problem in 4. Lessons follow the College Board's units and topics.
 - **Only the engine is real.** On the mentor's suggestion, the practice page will sit inside a minimal, abstracted mock of Grassroot, close to what students learn in class. Only the engine and the data it needs are real.
 
 ## An example
@@ -58,6 +59,8 @@ flowchart LR
 3. Then come skills in progress.
 4. Then reviews of mastered skills after 1, 3, 7, 14 and 30 days.
 5. Then new skills whose earlier skills are known.
+
+While a student practices one lesson, its skills come first within each rule, and about 1 problem in 4 is a review from outside it.
 
 Each batch covers two or three skills and, when choices are tied, mixes unrelated topics. The first pick looks for a problem the student should get 70 to 85% right and is labelled "solid" only if one exists. The others are "stretch": the problem with the most left to learn that the student should still get at least half right. There is no randomness.
 
