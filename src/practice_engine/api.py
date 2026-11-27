@@ -13,7 +13,11 @@ The requests:
   messages, so the page cannot give them away. A choice step's options and an order
   step's items come shuffled, so the right one is not always in the same place. It
   also gives `started_at`, the time the student opened the problem, which the page
-  sends back with each answer.
+  sends back with each answer. A template problem (numbers that change) is filled in
+  with a new variant each time it is opened, and `variant` says which; the page sends
+  it back too, so each answer is checked against the numbers the student saw. An
+  expression step lists the symbols the student may use, and a problem may carry a
+  graph for the page to draw.
 - POST /api/start {nickname}: the student's mastery and their next problems.
 - POST /api/answer: check one try at one step, save it, and say what the page shows
   next. A wrong first try gets why it is wrong and a hint, and one more try; a wrong
@@ -50,9 +54,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field, StringConstraints
 
 from practice_engine import __version__
-from practice_engine.checking import can_read, check_answer
+from practice_engine.checking import can_read, check_answer, why_unreadable
+from practice_engine.formulas import pretty, show_number
 from practice_engine.mastery import is_mastered
-from practice_engine.models import Step, StepAnswer, load_course, validate_course
+from practice_engine.models import (
+    TEMPLATE_VARIANTS,
+    Step,
+    StepAnswer,
+    fill_problem,
+    is_template,
+    load_course,
+    validate_course,
+)
 from practice_engine.selection import READY_MASTERY, Pick, next_problem, next_problems
 from practice_engine.storage import (
     load_history,
@@ -72,6 +85,9 @@ DEFAULT_DB = REPO / "practice.db"  # *.db files are never committed (see .gitign
 BATCH_SIZE = 3
 # How long an opened problem stays open for answers. Older, and the page must reopen it.
 OPEN_HOURS = 12
+# Variants of a template problem are numbered 1 to this; the course check fills in and
+# checks every one, so a student never gets a variant that was not checked.
+MAX_VARIANT = TEMPLATE_VARIANTS
 
 # A nickname: 1 to 24 letters, digits, spaces, "_" or "-", starting with a letter or
 # digit and not ending with a space. Anything else, such as "<script>", is refused.
@@ -100,6 +116,8 @@ class AnswerRequest(BaseModel):
     # Which try the page thinks this is. The server checks it against the saved tries.
     attempt: int = Field(ge=1, le=2)
     started_at: AwareDatetime  # from GET /api/problems; must have a time zone
+    # Which variant of a template problem was opened (from GET /api/problems).
+    variant: int | None = Field(default=None, ge=1, le=MAX_VARIANT)
 
 
 def create_app(
@@ -120,6 +138,12 @@ def create_app(
     skill_names = {skill.id: skill.name for skill in course.skills}
     problems = {problem.id: problem for problem in course.problems}
     lessons = {lesson.id: lesson for unit in course.units for lesson in unit.lessons}
+    # Lesson id -> the skills taught up to and including it, in curriculum order.
+    taught_by: dict[str, set[str]] = {}
+    so_far: set[str] = set()
+    for lesson in lessons.values():
+        so_far = so_far | set(lesson.skills)
+        taught_by[lesson.id] = so_far
 
     app = FastAPI(title="Grassroot Personalized Practice", version=__version__)
     app.mount("/page", StaticFiles(directory=PAGE), name="page")
@@ -131,10 +155,15 @@ def create_app(
         details = [{"loc": list(item["loc"]), "msg": item["msg"]} for item in error.errors()]
         return JSONResponse(status_code=422, content={"detail": details})
 
-    def find_step(problem_id: str, position: int) -> Step:
+    def find_step(problem_id: str, position: int, variant: int | None) -> Step:
+        """The step as the student saw it: a template's numbers filled in."""
         problem = problems.get(problem_id)
         if problem is None or not 1 <= position <= len(problem.steps):
             raise HTTPException(404, f"No step {position} in problem '{problem_id}'.")
+        if is_template(problem):
+            if variant is None:
+                raise HTTPException(409, "This problem changes its numbers. Open it again.")
+            problem = fill_problem(problem, variant)
         return problem.steps[position - 1]
 
     def mastery_view(db, nickname: str) -> list[dict]:
@@ -166,6 +195,8 @@ def create_app(
         missed = None
         if pick.missed_step is not None:
             missed_problem = problems[pick.missed_step.problem_id]
+            if is_template(missed_problem):  # show the numbers the student saw
+                missed_problem = fill_problem(missed_problem, pick.missed_step.variant or 1)
             position = pick.missed_step.step_position
             missed = {
                 "problem_title": missed_problem.title,
@@ -231,6 +262,8 @@ def create_app(
         problem = problems.get(problem_id)
         if problem is None:
             raise HTTPException(404, f"No problem '{problem_id}'.")
+        variant = random.randint(1, MAX_VARIANT) if is_template(problem) else None
+        problem = fill_problem(problem, variant)
         steps = []
         for position, step in enumerate(problem.steps, start=1):
             sent = {
@@ -244,13 +277,24 @@ def create_app(
                 sent["options"] = random.sample(step.options, len(step.options))
             if step.kind == "order":
                 sent["items"] = _shuffled(step.answer)
+            if step.kind == "expression":
+                sent["symbols"] = step.symbols
             steps.append(sent)
+        graph = None
+        if problem.graph is not None:
+            graph = {
+                "x_label": problem.graph.x_label,
+                "y_label": problem.graph.y_label,
+                "points": problem.graph.points,
+            }
         return {
             "id": problem.id,
             "title": problem.title,
             "prompt": problem.prompt,
             "difficulty": problem.difficulty,
             "steps": steps,
+            "graph": graph,
+            "variant": variant,
             "started_at": now().isoformat(),
         }
 
@@ -270,17 +314,19 @@ def create_app(
 
     @app.post("/api/lesson/next")
     def lesson_next(request: LessonRequest) -> dict:
+        taught = None
         if request.lesson_id is None:
             focus = None  # the whole course, with the usual readiness rule
         elif request.lesson_id in lessons:
             focus = set(lessons[request.lesson_id].skills)
+            taught = taught_by[request.lesson_id]
         else:
             raise HTTPException(404, f"No lesson '{request.lesson_id}'.")
         moment = now()
         with closing(open_storage(db_path)) as db:
             state = load_mastery(db, course, request.nickname)
             history = load_history(db, course, request.nickname)
-            pick = next_problem(course, state, history, moment, focus)
+            pick = next_problem(course, state, history, moment, focus, taught)
             if pick is None:
                 return {"pick": None}
             save_picks(db, course, request.nickname, [pick], moment)
@@ -288,10 +334,12 @@ def create_app(
 
     @app.post("/api/answer")
     def answer(request: AnswerRequest) -> dict:
-        step = find_step(request.problem_id, request.step_position)
+        step = find_step(request.problem_id, request.step_position, request.variant)
+        variant = request.variant if is_template(problems[request.problem_id]) else None
         given = request.given
         if not (can_read(step, given) and _fits(step, given)):
-            return {"readable": False, "correct": None, "step_done": False}
+            why = why_unreadable(step, given) if step.kind == "expression" else None
+            return {"readable": False, "correct": None, "step_done": False, "why": why}
         moment = now()
         if request.started_at > moment or moment - request.started_at > timedelta(hours=OPEN_HOURS):
             raise HTTPException(409, "This problem was opened too long ago. Open it again.")
@@ -304,7 +352,12 @@ def create_app(
                 request.step_position,
                 since=request.started_at,
             )
-            if tries and tries[-1][0].attempt == request.attempt and tries[-1][1] == given:
+            if tries and tries[0][0].variant != variant:
+                raise HTTPException(
+                    409, "This step was answered with other numbers. Open it again."
+                )
+            last = tries[-1] if tries else None
+            if last and last[0].attempt == request.attempt and last[1] == given:
                 # The same try again (its reply was lost): answer it again, save nothing.
                 correct = tries[-1][0].correct
             else:
@@ -326,6 +379,7 @@ def create_app(
                     hints_used=request.hints_used,
                     answered_at=moment,
                     attempt=request.attempt,
+                    variant=variant,
                 )
                 save_answer(db, course, step_answer, given)
             mastery = mastery_view(db, request.nickname)
@@ -392,7 +446,13 @@ def _why_wrong(step: Step, given: str | list[str]) -> str | None:
 def _right_answer(step: Step) -> str | list[str]:
     """The step's answer as the page shows it: text, a number as text, or an order."""
     if step.kind == "number":
-        return f"{step.answer:,}"  # such as 30, 5.48 or 1,400
+        if step.answer == int(step.answer):
+            return f"{int(step.answer):,}".replace("-", "−")  # such as 30, 1,400 or −240
+        if round(step.answer, 2) == step.answer:
+            return f"{step.answer:,}".replace("-", "−")  # such as 5.48
+        return show_number(step.answer)  # a template's worked-out answer, like 9.18
+    if step.kind == "expression":
+        return pretty(step.answer)  # like √(2·g·h), not code
     return step.answer
 
 

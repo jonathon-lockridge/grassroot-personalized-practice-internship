@@ -6,9 +6,9 @@ A practice engine that checks every step of a physics problem and picks the stud
 
 I'm Jonathon Lockridge, a high-school student and product design intern at [Grassroot Academy](https://grassroot.academy). I design and lead this project, mentored by Grassroot's cofounder. I wrote the plan ([PRD.md](PRD.md)), chose the subject and the rules for picking problems, and decide how the engine is judged.
 
-Result so far: on 50 simulated students, the engine got 41 to 42 to learn every skill within 600 steps, about twice as many as a teacher's usual order (20 to 22). No real students have used it yet.
+Result so far: on 50 simulated students, the engine got 41 to 42 to learn every skill within 600 steps, against 6 to 8 for a teacher's usual order. No real students have used it yet.
 
-Status: the engine, saved student records, the simulated-student test and a practice page all work. On the page, a student reads a short lesson, then practices it one problem at a time. I'm now trying the page and redesigning it until it feels right, and rewriting the problems to AP level with variants (new numbers, same ideas), one lesson first.
+Status: the engine, saved student records, the simulated-student test and a practice page all work. On the page, a student reads a short lesson, then practices it one problem at a time. Lesson 3.2 Work is rewritten to AP level: each problem changes its numbers and setting every time, some steps ask me to derive a formula, and one has a graph to read. I'm trying it now, and the other lessons follow the same way.
 
 ## The idea
 
@@ -21,6 +21,7 @@ The engine knows nothing about physics. A course is a data file of skills, probl
 - **Easy and hard picks side by side.** The plan said to give problems a student should get 70 to 85% right. The first engine gave harder problems instead, because they leave more to learn. I chose to keep both: each batch has a "solid" pick near 70 to 85% and "stretch" picks that are harder but still at least half right.
 - **The test that counts uses realistic students.** Of the two kinds of simulated students, I chose the ones that need the basics before advanced skills, as real students do, as the bar the engine must pass.
 - **Practice follows the lesson.** After a lesson, practice is mostly on that lesson's skills, one problem at a time, with a follow-up first after a miss and a review from an earlier lesson about 1 problem in 4. Lessons follow the College Board's units and topics.
+- **AP-level problems, never the same one twice.** Problems are templates whose numbers and setting change each time, with "derive an expression" steps and graphs like AP questions. I'm piloting this on 3.2 Work.
 - **Only the engine is real.** On my mentor's suggestion, the practice page will sit inside a minimal, abstracted mock of Grassroot, close to what students learn in class. Only the engine and the data it needs are real.
 
 ## An example
@@ -46,7 +47,7 @@ flowchart LR
 
 | Part | What it does |
 |---|---|
-| Checking (`checking.py`) | Marks a step right or wrong by its kind: a choice, a typed number within a set tolerance, or items put in order. Text that is not a number, like "five", asks the student to type again instead of counting as wrong. |
+| Checking (`checking.py`) | Marks a step right or wrong by its kind: a choice, a typed number within a set tolerance, items put in order, or a typed formula (right when it equals the answer for any values). Text that is not a number, like "five", asks the student to type again instead of counting as wrong. |
 | Mastery (`mastery.py`) | Bayesian Knowledge Tracing. For each skill the engine keeps one number from 0 to 1, how likely it is that the student knows it. A right answer raises it unless it could be a guess, a wrong one lowers it unless it looks like a slip, and practice itself can teach the skill. Only first tries count. A skill is mastered at 0.95 with the last 3 first tries right. |
 | Next problems (`selection.py`) | Picks the next problems by the rules below. |
 | Storage (`storage.py`) | Every answer is kept and never changed, and mastery is worked out again from that history, so the saved numbers always match it. Each pick is saved with its reason. Students go by nicknames, and deleting a student removes all of their data. (One SQLite database file.) |
@@ -70,20 +71,20 @@ No real students have used it yet; T8 will test it on real people. For now it is
 
 The result that counts uses learning-curve students. They improve a little with each step, more slowly when an earlier skill is missing, and forget a little each day. That is closer to how real students learn. It is a different model from the engine's, so the engine is not graded by its own math. It does share the course's map of which skills build on which, which the engine also uses, so this test favors any order that teaches the basics first.
 
-On both test runs below, the engine got about twice as many students to learn every skill as the teacher's order, and its students knew more at every checkpoint. A test run's seed fixes the simulation's random draws, so the same seed always prints the same report. The engine's rules were tuned on seeds 1, 7 and 11; seed 3 was never used for tuning.
+On both test runs below, the engine got far more students to learn every skill than the teacher's order, and its students knew more at every checkpoint. (The numbers are from the course with the AP-level 3.2 Work problems, 2026-11-27; with the longer problems the teacher's order now rarely finishes within 600 steps.) A test run's seed fixes the simulation's random draws, so the same seed always prints the same report. The engine's rules were tuned on seeds 1, 7 and 11; seed 3 was never used for tuning.
 
 | Test run (seed) | Order | Learned every skill (of 50) | Average known after 100 / 200 / 300 steps |
 |---|---|---|---|
-| 1 | Engine | 42 | 46% / 72% / 89% |
-| 1 | Expert | 22 | 36% / 69% / 86% |
-| 1 | Random | 8 | 35% / 59% / 76% |
-| 3 | Engine | 41 | 46% / 72% / 89% |
-| 3 | Expert | 20 | 36% / 70% / 87% |
-| 3 | Random | 15 | 34% / 60% / 78% |
+| 1 | Engine | 41 | 46% / 72% / 89% |
+| 1 | Expert | 6 | 39% / 69% / 85% |
+| 1 | Random | 7 | 36% / 62% / 79% |
+| 3 | Engine | 42 | 46% / 72% / 89% |
+| 3 | Expert | 8 | 39% / 69% / 86% |
+| 3 | Random | 10 | 35% / 61% / 79% |
 
 "Learned every skill" counts students who truly knew every skill at once within 600 steps. "Average known" is the students' average true knowledge.
 
-A second test uses simpler, BKT-like students: each one follows the same kind of model as the engine (knows a skill or not, with guesses and slips, at its own chances) and can learn advanced skills before the basics, which real students mostly cannot. With them the engine still gets the most students to the finish (48 of 50 on both seeds, against 41 and 42 for expert and 36 and 39 for random). But both other orders are ahead early (on seed 1, 65% for expert and 61% for random against 58% after 100 steps), and the engine catches up by 300 steps. I chose the first kind as the real test because it learns more like real students. The simulated students' settings were fixed before the first run, but they are a model, and real students may learn differently.
+A second test uses simpler, BKT-like students: each one follows the same kind of model as the engine (knows a skill or not, with guesses and slips, at its own chances) and can learn advanced skills before the basics, which real students mostly cannot. With them the engine still gets the most students to the finish (48 and 44 of 50 on seeds 1 and 3, against 34 and 35 for expert and 39 and 37 for random). But both other orders are ahead early (on seed 1, 66% for expert and 62% for random against 57% after 100 steps), and the engine catches up by 300 steps. I chose the first kind as the real test because it learns more like real students. The simulated students' settings were fixed before the first run, but they are a model, and real students may learn differently.
 
 ## Research behind the design
 
@@ -104,6 +105,7 @@ A second test uses simpler, BKT-like students: each one follows the same kind of
 |---|---|
 | `src/practice_engine/models.py` | What a course looks like, and a checker that lists every fault in a course file in plain English |
 | `src/practice_engine/checking.py` | Right or wrong for one step |
+| `src/practice_engine/formulas.py` | Reads and compares formulas safely (no code is ever run from text) |
 | `src/practice_engine/mastery.py` | The mastery estimate (Bayesian Knowledge Tracing) |
 | `src/practice_engine/selection.py` | The next-problem rules and their reasons |
 | `src/practice_engine/storage.py` | Saved students, answers and picks (SQLite) |

@@ -11,13 +11,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+# The physics course with push_cart's numbers frozen (see plain_course.py).
+from plain_course import COURSE
+
 from practice_engine import __version__
 from practice_engine.api import create_app
-from practice_engine.models import load_course
-
-COURSE = (
-    Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
-)
+from practice_engine.models import TEMPLATE_VARIANTS, fill_problem, load_course
 
 # Problem push_cart: step 1 is a choice (choose_principle), step 2 the number 30
 # (work_constant_force), step 3 the number 5.48 within 0.05 (kinetic_energy).
@@ -462,3 +461,96 @@ def test_any_subject_works_the_same_way(tmp_path: Path, clock: Clock) -> None:
         "/api/lesson/next", json={"nickname": "kiwi", "lesson_id": "rests_lesson"}
     )
     assert again.json() == {"pick": None}
+
+
+# Template problems and formula answers (decided 2026-11-27).
+
+
+def open_variant(client: TestClient, problem_id: str = "changing_force") -> dict:
+    return client.get(f"/api/problems/{problem_id}").json()
+
+
+def send(client: TestClient, problem: dict, step: int, given, attempt: int = 1, **extra) -> dict:
+    sent = {
+        "nickname": "kiwi",
+        "problem_id": problem["id"],
+        "step_position": step,
+        "given": given,
+        "seconds": 9.0,
+        "hints_used": 0,
+        "attempt": attempt,
+        "started_at": problem["started_at"],
+        "variant": problem["variant"],
+    }
+    sent.update(extra)
+    return client.post("/api/answer", json=sent)
+
+
+def test_a_template_problem_comes_filled_in_with_its_variant(client: TestClient) -> None:
+    problem = open_variant(client)
+
+    assert isinstance(problem["variant"], int)
+    assert "{" not in problem["prompt"] and "α = " in problem["prompt"]
+    assert problem["steps"][2]["kind"] == "expression"
+    assert problem["steps"][2]["symbols"] == ["alpha", "D"]
+
+
+def test_a_number_answer_is_checked_against_the_variant_the_student_saw(client: TestClient) -> None:
+    course = load_course(COURSE)
+    template = next(p for p in course.problems if p.id == "changing_force")
+    problem = open_variant(client)
+    work = fill_problem(template, problem["variant"]).steps[3].answer
+
+    assert send(client, problem, 1, PRINCIPLE).json()["correct"] is True
+    assert send(client, problem, 4, f"{work:.3g}").json()["correct"] is True
+
+
+def test_a_template_answer_without_its_variant_is_refused(client: TestClient) -> None:
+    problem = open_variant(client)
+
+    assert send(client, problem, 1, PRINCIPLE, variant=None).status_code == 409
+
+
+def test_a_typed_formula_is_checked_and_an_unreadable_one_asked_again(client: TestClient) -> None:
+    problem = open_variant(client)
+
+    unreadable = send(client, problem, 3, "alpha D^3 / (3").json()  # a bracket left open
+    right = send(client, problem, 3, "αD³/3").json()
+
+    assert unreadable["readable"] is False and "bracket" in unreadable["why"]
+    assert right["correct"] is True
+
+
+def test_a_wrong_formula_shows_the_right_one_after_the_second_try(client: TestClient) -> None:
+    problem = open_variant(client)
+
+    send(client, problem, 3, "alpha*D^2/2")
+    second = send(client, problem, 3, "alpha*D^2", attempt=2).json()
+
+    assert second["correct"] is False and second["right_answer"] == "α·D³/3"
+
+
+def test_a_second_try_with_other_numbers_is_refused(client: TestClient) -> None:
+    problem = open_variant(client)
+    other = problem["variant"] % 1000 + 1
+
+    send(client, problem, 3, "alpha*D^2")
+    refused = send(client, problem, 3, "alpha*D^3/3", attempt=2, variant=other)
+
+    assert refused.status_code == 409 and "other numbers" in refused.json()["detail"]
+
+
+def test_a_graph_problem_sends_its_points(client: TestClient) -> None:
+    problem = open_variant(client, "force_graph")
+
+    assert problem["graph"]["x_label"] == "x (m)"
+    assert len(problem["graph"]["points"]) == 5  # the last one below the axis
+    assert all(
+        isinstance(value, float | int) for point in problem["graph"]["points"] for value in point
+    )
+
+
+def test_only_checked_variants_are_handed_out(client: TestClient) -> None:
+    variants = {open_variant(client)["variant"] for _ in range(30)}
+
+    assert all(1 <= v <= TEMPLATE_VARIANTS for v in variants)

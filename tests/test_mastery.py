@@ -1,9 +1,12 @@
 """Checks for the mastery update (step T2 and its follow-up)."""
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
+
+# The course file, found from this test file's own location (see test_models.py).
+# The physics course with push_cart's numbers frozen (see plain_course.py).
+from plain_course import COURSE
 from pydantic import ValidationError
 
 from practice_engine.mastery import (
@@ -22,11 +25,6 @@ from practice_engine.mastery import (
     update_mastery,
 )
 from practice_engine.models import Course, MasteryState, StepAnswer, load_course
-
-# The course file, found from this test file's own location (see test_models.py).
-COURSE = (
-    Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
-)
 
 # In the course, problem push_cart has three steps:
 # step 1 is a choice step with 4 options, skill choose_principle;
@@ -117,12 +115,12 @@ def test_wrong_step_never_raises_mastery_after_earlier_misses() -> None:
         state = update_mastery(state, answer(2, correct=False), course)
     low = state.mastery[NUMBER_SKILL]
 
-    # A wrong choice step on the same skill (problem drag_crate step 3, 3 options), slow,
+    # A wrong choice step on the same skill (problem drag_crate step 4, 3 options), slow,
     # fast or after a hint, must not lift it.
     for wrong in (
-        answer(3, correct=False, seconds=20),
-        answer(3, correct=False, seconds=2),
-        answer(3, correct=False, hints_used=1),
+        answer(4, correct=False, seconds=20),
+        answer(4, correct=False, seconds=2),
+        answer(4, correct=False, hints_used=1),
     ):
         wrong = wrong.model_copy(update={"problem_id": "drag_crate"})
         after = update_mastery(state, wrong, course)
@@ -134,7 +132,7 @@ def test_wrong_step_never_raises_mastery_after_earlier_misses() -> None:
     [
         ("number", "push_cart", 2, NUMBER_SKILL),
         ("choice with 4 options", "push_cart", 1, CHOICE_SKILL),
-        ("choice with 3 options", "drag_crate", 3, NUMBER_SKILL),
+        ("choice with 3 options", "drag_crate", 4, NUMBER_SKILL),
         ("order of 3 items", "spring_launch", 2, "energy_conservation"),
     ],
 )

@@ -11,7 +11,8 @@ nothing new needs installing. The file has three tables:
   picked, written as JSON text (a standard way to write values as text), so T8 can
   see which wrong option was chosen and read it back exactly: typed text keeps its
   quote marks, a number has none, and an order is a list in square brackets. It may
-  be left empty.
+  be left empty. A `variant` column says which version of a template problem was
+  answered (see models.fill_problem), so the answer is checked against its numbers.
 - picks: every next problem the engine chose, with its reason (PRD decision 4), the
   rule that made it, and whether it was meant as a "solid" or a "stretch" problem
   (see selection.py).
@@ -75,7 +76,7 @@ from pathlib import Path
 
 from practice_engine.checking import check_answer
 from practice_engine.mastery import find_step, new_mastery_state, step_table, update_mastery
-from practice_engine.models import Course, MasteryState, StepAnswer
+from practice_engine.models import Course, MasteryState, StepAnswer, fill_problem, is_template
 from practice_engine.selection import MissedStep, Pick
 
 # What a student can give as an answer: text, a number, or a list of texts (an order).
@@ -105,6 +106,7 @@ CREATE TABLE IF NOT EXISTS answers (
     attempt INTEGER NOT NULL,
     answered_at TEXT NOT NULL,
     given TEXT,
+    variant INTEGER,  -- which version of a template problem; empty for other problems
     UNIQUE (nickname, course_id, problem_id, step_position, attempt, answered_at)
 );
 CREATE TABLE IF NOT EXISTS picks (
@@ -128,7 +130,8 @@ CREATE TABLE IF NOT EXISTS picks (
 # "user_version"). Raise it whenever the layout or the meaning of a column changes.
 # 1: picks has a rule column, and `given` is JSON text.
 # 2: picks has a challenge column.
-SCHEMA_VERSION = 2
+# 3: answers has a variant column (a layout-2 file gains it when opened).
+SCHEMA_VERSION = 3
 
 # One delete for every table that holds rows about a student, for forget_student.
 FORGET_QUERIES = (
@@ -153,6 +156,24 @@ def open_storage(path: str | Path) -> sqlite3.Connection:
     db = sqlite3.connect(path)
     version = db.execute("PRAGMA user_version").fetchone()[0]
     has_tables = db.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
+    if has_tables and version == 2:
+        # Layout 2 only lacks the variant column, so add it: nothing else changes. One
+        # locked transaction, read again inside it, so two requests opening the file at
+        # once add it only once, and a crash part way leaves the file as it was.
+        db.isolation_level = None  # this block manages its own transaction
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(answers)")}
+            if "variant" not in columns:
+                db.execute("ALTER TABLE answers ADD COLUMN variant INTEGER")
+            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+        finally:
+            db.isolation_level = ""  # back to Python's usual handling
+        version = SCHEMA_VERSION
     if has_tables and version != SCHEMA_VERSION:
         db.close()
         raise ValueError(
@@ -181,6 +202,14 @@ def save_answer(
     if not math.isfinite(answer.seconds):
         raise ValueError(f"The answer's seconds ({answer.seconds}) is not a usable number.")
     step = find_step(course, answer.problem_id, answer.step_position)
+    problem = next(p for p in course.problems if p.id == answer.problem_id)
+    if is_template(problem):
+        if answer.variant is None:
+            raise ValueError(
+                f"'{answer.problem_id}' changes its numbers, so an answer to it must say "
+                "which variant was answered."
+            )
+        step = fill_problem(problem, answer.variant).steps[answer.step_position - 1]
     step_right = None if given is None else check_answer(step, given)
     _check_flag(answer, step_right, given)
     row = (
@@ -195,13 +224,14 @@ def save_answer(
         answer.attempt,
         answered_at,
         None if given is None else json.dumps(given),
+        answer.variant,
     )
     with db:  # one transaction: both rows are saved, or neither
         db.execute(_ADD_STUDENT, (answer.nickname, course.id, answered_at))
         added = db.execute(
             "INSERT INTO answers (nickname, course_id, problem_id, step_position, skill_id,"
-            " correct, seconds, hints_used, attempt, answered_at, given)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " correct, seconds, hints_used, attempt, answered_at, given, variant)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT DO NOTHING",
             row,
         ).rowcount
@@ -210,7 +240,7 @@ def save_answer(
     # Already there. If the details differ, one of the two is a mistake: say so.
     saved = db.execute(
         "SELECT nickname, course_id, problem_id, step_position, skill_id, correct, seconds,"
-        " hints_used, attempt, answered_at, given FROM answers"
+        " hints_used, attempt, answered_at, given, variant FROM answers"
         " WHERE nickname = ? AND course_id = ? AND problem_id = ? AND step_position = ?"
         " AND attempt = ? AND answered_at = ?",
         (
@@ -270,7 +300,7 @@ def load_tries(
     The page uses this to work out which try comes next, instead of trusting the page.
     """
     rows = db.execute(
-        "SELECT correct, seconds, hints_used, answered_at, attempt, given FROM answers"
+        "SELECT correct, seconds, hints_used, answered_at, attempt, given, variant FROM answers"
         " WHERE nickname = ? AND course_id = ? AND problem_id = ? AND step_position = ?"
         " AND answered_at >= ? ORDER BY answered_at, seq",
         (nickname, course.id, problem_id, step_position, _to_text(since)),
@@ -286,10 +316,11 @@ def load_tries(
                 hints_used=hints_used,
                 answered_at=_from_text(answered_at),
                 attempt=attempt,
+                variant=variant,
             ),
             None if given is None else json.loads(given),
         )
-        for correct, seconds, hints_used, answered_at, attempt, given in rows
+        for correct, seconds, hints_used, answered_at, attempt, given, variant in rows
     ]
 
 
@@ -450,7 +481,7 @@ def _load_answers(
     """The student's saved answers, oldest first, each with the skill saved beside it."""
     rows = db.execute(
         "SELECT nickname, problem_id, step_position, correct, seconds, hints_used,"
-        " answered_at, attempt, skill_id FROM answers"
+        " answered_at, attempt, skill_id, variant FROM answers"
         " WHERE nickname = ? AND course_id = ? ORDER BY answered_at, seq",
         (nickname, course.id),
     ).fetchall()
@@ -465,6 +496,7 @@ def _load_answers(
                 hints_used=row[5],
                 answered_at=_from_text(row[6]),
                 attempt=row[7],
+                variant=row[9],
             ),
             row[8],
         )

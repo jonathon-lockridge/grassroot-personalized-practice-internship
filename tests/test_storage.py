@@ -12,8 +12,11 @@ from pathlib import Path
 
 import pytest
 
+# The physics course with push_cart's numbers frozen (see plain_course.py).
+from plain_course import COURSE
+
 from practice_engine.mastery import new_mastery_state, update_mastery
-from practice_engine.models import Course, Step, StepAnswer, load_course
+from practice_engine.models import Course, Step, StepAnswer, fill_problem, load_course
 from practice_engine.selection import MissedStep, Pick
 from practice_engine.storage import (
     check_saved_answers,
@@ -26,10 +29,6 @@ from practice_engine.storage import (
     open_storage,
     save_answer,
     save_picks,
-)
-
-COURSE = (
-    Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
 )
 
 # Problem push_cart: step 1 is choose_principle, step 2 work_constant_force,
@@ -108,9 +107,9 @@ def test_replaying_saved_answers_gives_exactly_the_live_state(course: Course, pa
         answer(1, True, minute=0),
         answer(2, False, minute=1),
         answer(3, True, minute=2, hints_used=2),
-        answer(1, False, minute=10, problem_id="drag_crate"),
-        answer(1, True, minute=11, problem_id="drag_crate", attempt=2),
-        answer(2, True, minute=12, problem_id="drag_crate"),
+        answer(1, False, minute=10, problem_id="car_power"),
+        answer(1, True, minute=11, problem_id="car_power", attempt=2),
+        answer(2, True, minute=12, problem_id="car_power"),
     ]
     live = new_mastery_state(course, "sam")
     with closing(open_storage(path)) as db:
@@ -315,7 +314,7 @@ def test_a_student_with_only_picks_is_listed(course: Course, path: Path) -> None
 def a_batch() -> list[Pick]:
     return [
         Pick(
-            problem_id="drag_crate",
+            problem_id="car_power",
             reason="Picked for you: you missed step 2 of Push a cart.",
             is_follow_up=True,
             target_skill="work_constant_force",
@@ -535,3 +534,62 @@ def test_a_new_file_opens_again_after_closing(course: Course, path: Path) -> Non
         save(db, course, answer(2, True))
     with closing(open_storage(path)) as db:
         assert len(load_history(db, course, "sam")) == 1
+
+
+# Template problems (decided 2026-11-27): each answer keeps its variant.
+
+
+def test_a_template_answer_is_checked_against_its_variant_and_kept(
+    course: Course, path: Path
+) -> None:
+    template = next(p for p in course.problems if p.id == "changing_force")
+    work = fill_problem(template, 5).steps[3].answer
+    right = answer(4, True, problem_id="changing_force").model_copy(update={"variant": 5})
+
+    with closing(open_storage(path)) as db:
+        with pytest.raises(ValueError, match="which variant"):
+            save_answer(db, course, right.model_copy(update={"variant": None}), given=str(work))
+        with pytest.raises(ValueError, match="is marked right"):
+            save_answer(db, course, right, given=str(work * 2))
+        assert save_answer(db, course, right, given=str(work)) is True
+        assert load_history(db, course, "sam")[-1].variant == 5
+
+
+def test_a_layout_2_file_gains_the_variant_column_and_keeps_its_answers(
+    course: Course, path: Path
+) -> None:
+    with closing(open_storage(path)) as db:
+        save(db, course, answer(1, True))
+        db.execute("ALTER TABLE answers DROP COLUMN variant")
+        db.execute("PRAGMA user_version = 2")
+        db.commit()
+
+    with closing(open_storage(path)) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert load_history(db, course, "sam") == [answer(1, True)]
+
+
+def test_two_requests_opening_an_old_file_at_once_both_work(course: Course, path: Path) -> None:
+    import threading
+
+    with closing(open_storage(path)) as db:
+        save(db, course, answer(1, True))
+        db.execute("ALTER TABLE answers DROP COLUMN variant")
+        db.execute("PRAGMA user_version = 2")
+        db.commit()
+    errors = []
+
+    def open_it() -> None:
+        try:
+            with closing(open_storage(path)):
+                pass
+        except Exception as error:  # any failure fails the test below
+            errors.append(error)
+
+    threads = [threading.Thread(target=open_it) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []

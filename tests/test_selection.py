@@ -1009,7 +1009,7 @@ def test_real_course_starting_check() -> None:
 
     picks = next_problems(course, new_mastery_state(course, "sam"), [], NOW)
 
-    assert ids(picks) == ["box_slides_to_stop", "drag_crate", "bat_hits_ball"]
+    assert ids(picks) == ["box_slides_to_stop", "push_cart", "bat_hits_ball"]
     # choose_principle is the first step of every problem, so the check is never
     # aimed at it.
     assert skills_of(picks) == ["newtons_laws", "work_constant_force", "momentum_impulse"]
@@ -1115,10 +1115,11 @@ def test_real_course_new_student_is_not_given_a_hard_problem_first() -> None:
 
     picks = next_problems(course, student, history, NOW)
 
-    # No problem fits the 70-85% target at the starting numbers, so the easy problems
-    # (difficulty 1) come before the medium and hard ones.
+    # No problem fits the 70-85% target at the starting numbers, so lower difficulties
+    # come first: never a hard one (3). (A skill whose only easy problem became a
+    # medium AP-level template on 2026-11-27 may get a medium one.)
     difficulties = {problem.id: problem.difficulty for problem in course.problems}
-    assert all(difficulties[pick.problem_id] == 1 for pick in picks)
+    assert all(difficulties[pick.problem_id] < 3 for pick in picks)
 
 
 def test_real_course_reasons_never_show_ids() -> None:
@@ -2212,3 +2213,68 @@ def test_a_problem_that_mixes_in_an_earlier_skill_ends_the_lesson_run() -> None:
 
     # Only one problem since pca was purely on the lesson, so no outside review yet.
     assert pick is not None and pick.target_skill in LESSON
+
+
+def test_a_template_comes_back_with_new_numbers_but_never_twice_in_a_row() -> None:
+    course = lesson_course()
+    template = course.problems[3].model_copy(
+        update={"numbers": {"k": {"start": 1, "stop": 5, "step": 1}}}
+    )
+    course = course.model_copy(
+        update={"problems": [*course.problems[:3], template, *course.problems[4:]]}
+    )
+    # pc1 is now a template; c's other problems were all done today.
+    done_c = [
+        answer("pc2", 1, True, NOW - timedelta(minutes=30)),
+        answer("pc3", 1, True, NOW - timedelta(minutes=25)),
+    ]
+    after_other = done_c + [
+        answer("pc1", 1, True, NOW - timedelta(minutes=20)),
+        answer("pd1", 1, True, NOW - timedelta(minutes=10)),
+    ]
+    right_after = done_c + [
+        answer("pd1", 1, True, NOW - timedelta(minutes=20)),
+        answer("pc1", 1, True, NOW - timedelta(minutes=10)),
+    ]
+
+    back = next_problem(course, state(MID), after_other, NOW, {"c"})
+    not_again = next_problem(course, state(MID), right_after, NOW, {"c"})
+
+    assert back is not None and back.problem_id == "pc1"
+    assert not_again is None
+
+
+def test_a_follow_up_avoids_a_problem_on_a_skill_not_taught_yet() -> None:
+    course = tiny_course(
+        {"k": [], "w": [], "p": []},
+        [("pw1", 1, ["w", "k"]), ("pkp", 1, ["k", "p"]), ("pk", 2, ["k"]), ("pw2", 1, ["w"])],
+    )
+    history = [answer("pw1", 2, False, NOW - timedelta(minutes=5))]  # missed k
+    student = state({"k": 0.3, "w": 0.5, "p": START_MASTERY})
+
+    loose = next_problem(course, student, history, NOW, {"w"})
+    careful = next_problem(course, student, history, NOW, {"w"}, taught={"w", "k"})
+
+    assert loose is not None and loose.problem_id == "pkp"  # easier, but on p
+    assert careful is not None and careful.problem_id == "pk"  # p is not taught yet
+
+
+def test_a_taught_template_beats_a_fresh_problem_on_an_untaught_topic() -> None:
+    course = tiny_course(
+        {"k": [], "w": [], "p": []},
+        [("pw1", 1, ["w", "k"]), ("pkp", 1, ["k", "p"]), ("pk", 1, ["k"]), ("pw2", 1, ["w"])],
+    )
+    template = course.problems[2].model_copy(
+        update={"numbers": {"n": {"start": 1, "stop": 3, "step": 1}}}
+    )
+    course = course.model_copy(
+        update={"problems": [*course.problems[:2], template, course.problems[3]]}
+    )
+    history = [
+        answer("pk", 1, True, NOW - timedelta(minutes=9)),
+        answer("pw1", 2, False, NOW - timedelta(minutes=5)),  # missed k
+    ]
+
+    pick = next_problem(course, state({"k": 0.3, "w": 0.5}), history, NOW, {"w"}, taught={"w", "k"})
+
+    assert pick is not None and pick.problem_id == "pk"  # new numbers, not topic p

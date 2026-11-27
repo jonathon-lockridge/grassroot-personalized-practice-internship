@@ -177,6 +177,19 @@ button, input { font: inherit; }
 }
 .option:hover { border-color: var(--muted); }
 .option input { margin-top: 0.3rem; }
+.expression-box { margin-bottom: 0.75rem; }
+.expression-box input {
+  width: 100%; padding: 0.5rem 0.7rem; border: 1px solid var(--line); border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.expression-box p { margin: 0.3rem 0 0; }
+.graph { margin: 0 0 0.5rem; }
+.graph-svg { width: 100%; max-width: 30rem; height: auto; display: block; }
+.graph-svg .grid { stroke: var(--line); stroke-dasharray: 3 3; }
+.graph-svg .axis { stroke: var(--ink); stroke-width: 1.5; }
+.graph-svg .plot { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+.graph-svg .tick { font-size: 11px; fill: var(--muted); }
+.graph-svg .axis-label { font-size: 12px; fill: var(--ink); font-weight: 600; }
 .number-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
 .number-row input {
   width: 10rem; padding: 0.5rem 0.7rem; border: 1px solid var(--line); border-radius: 10px;

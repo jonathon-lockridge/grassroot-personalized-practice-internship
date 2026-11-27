@@ -1,0 +1,41 @@
+{
+  "id": "push_cart",
+  "title": "Pushing a cart",
+  "prompt": "A 2.0 kg cart starts at rest on a frictionless track. You push it with a constant 10 N horizontal force for 3.0 m.",
+  "difficulty": 1,
+  "steps": [
+    {
+      "prompt": "Which principle links your push to the cart's final speed, using the force and the distance but not the time?",
+      "kind": "choice",
+      "options": [
+        "Conservation of mechanical energy",
+        "Work-energy theorem (net work equals change in kinetic energy)",
+        "Conservation of momentum",
+        "Impulse-momentum theorem (impulse equals change in momentum)"
+      ],
+      "answer": "Work-energy theorem (net work equals change in kinetic energy)",
+      "feedback": {
+        "Conservation of mechanical energy": "Mechanical energy isn't conserved here: your push does work on the cart and adds energy.",
+        "Conservation of momentum": "Momentum isn't conserved here: your push is an outside force.",
+        "Impulse-momentum theorem (impulse equals change in momentum)": "Impulse needs how long the push lasts, and you know the distance, not the time."
+      },
+      "hint": "You know a force and a distance. Force times distance is work, and the net work on the cart changes its kinetic energy.",
+      "skill": "choose_principle"
+    },
+    {
+      "prompt": "How much work, in joules, does your push do on the cart?",
+      "kind": "number",
+      "answer": 30,
+      "hint": "The force points along the motion, so W = Fd = 10 × 3.0.",
+      "skill": "work_constant_force"
+    },
+    {
+      "prompt": "What is the cart's final speed, in m/s?",
+      "kind": "number",
+      "answer": 5.48,
+      "tolerance": 0.05,
+      "hint": "All 30 J becomes kinetic energy: ½(2.0)v² = 30, so v = √30.",
+      "skill": "kinetic_energy"
+    }
+  ]
+}

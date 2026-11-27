@@ -7,7 +7,10 @@ Two helpers:
   number step, so the page can ask the student to type it again instead of marking
   it wrong. The page should call this first, before check_answer.
 - check_answer(step, given): gives back True if `given` is right by the rules of the
-  step's kind, and False if not. An answer of the wrong sort, such as nothing at all
+  step's kind, and False if not. A typed formula (an "expression" step) is right
+  when it equals the answer formula for every value of its symbols (formulas.py).
+- why_unreadable(step, given): for an expression step, why a typed formula cannot
+  be read, or None. An answer of the wrong sort, such as nothing at all
   or a word where a number belongs, is simply wrong; it never stops the program.
 
 A number may be typed with the minus sign "−" that some keyboards and pasted text
@@ -26,6 +29,7 @@ server or stored data.
 import math
 import re
 
+from practice_engine.formulas import FormulaError, equivalent, parse
 from practice_engine.models import Step
 
 # The minus sign "−" (a different character from the hyphen "-" on most keyboards)
@@ -55,7 +59,22 @@ def can_read(step: Step, given: object) -> bool:
         return _read_number(given) is not None
     if step.kind == "order":
         return isinstance(given, list) and all(isinstance(item, str) for item in given)
+    if step.kind == "expression":
+        return why_unreadable(step, given) is None
     return False  # a kind we do not know; validate_course reports it
+
+
+def why_unreadable(step: Step, given: object) -> str | None:
+    """For an expression step: why the typed formula cannot be read, in plain words,
+    or None if it can. A slip like a missing bracket asks again instead of counting
+    as wrong."""
+    if not isinstance(given, str):
+        return "Type a formula."
+    try:
+        parse(given, step.symbols or [])
+    except FormulaError as error:
+        return str(error)
+    return None
 
 
 def check_answer(step: Step, given: object) -> bool:
@@ -70,6 +89,10 @@ def check_answer(step: Step, given: object) -> bool:
         return _check_number(step, given)
     if step.kind == "order":
         return _check_order(step, given)
+    if step.kind == "expression":
+        if why_unreadable(step, given) is not None:
+            return False
+        return equivalent(given, step.answer, step.symbols or [])
     return False  # a kind we do not know; validate_course reports it
 
 

@@ -18,6 +18,9 @@ const CHALLENGE_WORDS = {
   stretch: "A stretch, worth it",
 };
 const LEVELS = { 1: "Easy", 2: "Medium", 3: "Hard" };
+// How a symbol in an expression step looks, and what to type for it.
+const SYMBOL_LOOKS = { theta: "θ", mu: "μ", alpha: "α", beta: "β", omega: "ω", phi: "φ", lambda: "λ", v0: "v₀", x0: "x₀" };
+const SVG = "http://www.w3.org/2000/svg";
 // The skills panel shows a level, not a raw number, so a new student does not read a
 // column of low percentages as failing grades. ALMOST is the mastery number from which
 // a skill shows as "Almost there"; "Mastered" comes from the engine's own rule.
@@ -73,6 +76,12 @@ async function api(path, body) {
   if (!response.ok) {
     const error = new Error(`The server said ${response.status} for ${path}.`);
     error.status = response.status;
+    try {
+      const body = await response.json();
+      if (typeof body.detail === "string") error.detail = body.detail; // a plain message
+    } catch (ignored) {
+      // no readable message; the caller says something general
+    }
     throw error;
   }
   return response.json();
@@ -381,10 +390,68 @@ async function startProblem(pick) {
   $("problem-title").textContent = state.problem.title;
   $("problem-level").textContent = LEVELS[state.problem.difficulty];
   $("problem-prompt").textContent = state.problem.prompt;
+  renderGraph(state.problem.graph);
   const banner = [pickTags(pick), el("p", { class: "why-plain", text: pick.reason }), missedBox(pick)];
   $("why-banner").replaceChildren(...banner.filter(Boolean)); // no missed step: no box
   show("problem-view"); // first, so the first answer box can take the keyboard
   startStep();
+}
+
+// A line graph from the problem's points, such as force against position. Drawn as
+// SVG shapes made one by one, never from text, like the rest of the page.
+function renderGraph(graph) {
+  const box = $("problem-graph");
+  box.hidden = !graph;
+  if (!graph) {
+    box.replaceChildren();
+    return;
+  }
+  const W = 420, H = 240, left = 52, right = 16, top = 16, bottom = 44;
+  const xs = graph.points.map((p) => p[0]);
+  const ys = graph.points.map((p) => p[1]);
+  const xMin = Math.min(0, ...xs);
+  const xMax = Math.max(0, ...xs) > xMin ? Math.max(0, ...xs) : xMin + 1;
+  const yMin = Math.min(0, ...ys);
+  const yMax = Math.max(0, ...ys) > yMin ? Math.max(0, ...ys) : yMin + 1;
+  const sx = (x) => left + ((x - xMin) / (xMax - xMin)) * (W - left - right);
+  const sy = (y) => top + ((yMax - y) / (yMax - yMin)) * (H - top - bottom);
+  const make = (tag, attrs, text) => {
+    const node = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const label = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : String(+v.toFixed(2)));
+  const svg = make("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", class: "graph-svg", "aria-labelledby": "graph-title" });
+  const description = graph.points.map((p) => `(${label(p[0])}, ${label(p[1])})`).join(", ");
+  svg.append(make("title", { id: "graph-title" }, `${graph.y_label} against ${graph.x_label}: straight lines through ${description}`));
+  // Gridlines at even steps (so areas can be counted), plus every point's own value.
+  const niceStep = (span) => [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000].find((s) => span / s <= 6) || span / 5;
+  const ticks = (low, high, own) => {
+    const step = niceStep(high - low);
+    const even = [];
+    for (let v = Math.ceil(low / step) * step; v <= high + 1e-9; v += step) even.push(+v.toFixed(6));
+    const mine = own.map((v) => +v.toFixed(6));
+    // An even tick too close to a point's own value would print on top of it.
+    const clear = even.filter((v) => mine.every((m) => m === v || Math.abs(m - v) >= step * 0.4));
+    return [...new Set([...clear, ...mine])].sort((a, b) => a - b);
+  };
+  const xTicks = ticks(xMin, xMax, xs);
+  const yTicks = ticks(yMin, yMax, [0, ...ys]);
+  for (const x of xTicks) {
+    svg.append(make("line", { x1: sx(x), y1: top, x2: sx(x), y2: H - bottom, class: "grid" }));
+    svg.append(make("text", { x: sx(x), y: H - bottom + 16, "text-anchor": "middle", class: "tick" }, label(x)));
+  }
+  for (const y of yTicks) {
+    svg.append(make("line", { x1: left, y1: sy(y), x2: W - right, y2: sy(y), class: "grid" }));
+    svg.append(make("text", { x: left - 6, y: sy(y) + 4, "text-anchor": "end", class: "tick" }, label(y)));
+  }
+  svg.append(make("line", { x1: left, y1: sy(0), x2: W - right, y2: sy(0), class: "axis" }));
+  svg.append(make("line", { x1: sx(0), y1: top, x2: sx(0), y2: H - bottom, class: "axis" }));
+  svg.append(make("polyline", { points: graph.points.map((p) => `${sx(p[0])},${sy(p[1])}`).join(" "), class: "plot" }));
+  svg.append(make("text", { x: (left + W - right) / 2, y: H - 8, "text-anchor": "middle", class: "axis-label" }, graph.x_label));
+  svg.append(make("text", { x: 14, y: (top + H - bottom) / 2, "text-anchor": "middle", class: "axis-label", transform: `rotate(-90 14 ${(top + H - bottom) / 2})` }, graph.y_label));
+  box.replaceChildren(svg);
 }
 
 function startStep() {
@@ -405,6 +472,7 @@ function renderSteps() {
   const current = steps[state.stepIndex];
   renderMastery(state.mastery, current ? current.skill_name : null);
   const focus = $("steps").querySelector(".step.current input:not([disabled]), .step.current .order-item button:not([disabled])");
+  // A choice step keeps the keyboard on its first option; a typed answer on its box.
   if (focus) focus.focus({ preventScroll: true });
 }
 
@@ -492,6 +560,28 @@ function answerInput(step) {
       }),
     );
   }
+  if (step.kind === "expression") {
+    const symbols = step.symbols.map((s) => (SYMBOL_LOOKS[s] ? `${SYMBOL_LOOKS[s]} (type ${s})` : s));
+    return el(
+      "div",
+      { class: "expression-box" },
+      el("input", {
+        type: "text",
+        name: "expression",
+        "aria-labelledby": `prompt-${step.position}`,
+        "aria-describedby": `symbols-${step.position}`,
+        placeholder: "type a formula",
+        autocomplete: "off",
+        autocapitalize: "off",
+        spellcheck: "false",
+      }),
+      el(
+        "p",
+        { class: "small muted", id: `symbols-${step.position}` },
+        `You can use: ${symbols.join(", ")}. Write * for times (2Fd also means 2·F·d), / to divide, ^ for powers, and sqrt( ), sin( ), cos( ).`,
+      ),
+    );
+  }
   if (step.kind === "number") {
     return el(
       "div",
@@ -552,6 +642,10 @@ function readGiven(form, step) {
     const typed = form.querySelector("input[name=number]").value.trim();
     return typed === "" ? null : typed;
   }
+  if (step.kind === "expression") {
+    const typed = form.querySelector("input[name=expression]").value.trim();
+    return typed === "" ? null : typed;
+  }
   return [...state.order.items];
 }
 
@@ -566,7 +660,8 @@ async function onCheck(event, step) {
   const form = event.currentTarget;
   const given = readGiven(form, step);
   if (given === null) {
-    setFeedback(form, "retype", step.kind === "choice" ? "Pick one option first." : "Type a number first.");
+    const ask = { choice: "Pick one option first.", expression: "Type a formula first." };
+    setFeedback(form, "retype", ask[step.kind] || "Type a number first.");
     return;
   }
   if (state.busy) return; // a double click must not send the same try twice
@@ -583,10 +678,11 @@ async function onCheck(event, step) {
       hints_used: state.hintShown ? 1 : 0,
       attempt: state.attempt,
       started_at: state.problem.started_at,
+      variant: state.problem.variant,
     });
   } catch (error) {
     const message = error.status === 409
-      ? "This step was already saved. Go back to the lesson and start practice again."
+      ? `${error.detail || "This step was already saved."} Go back to the lesson and start practice again.`
       : "Could not reach the practice engine. Try Check again.";
     setFeedback(form, "retype", message);
     return;
@@ -594,9 +690,11 @@ async function onCheck(event, step) {
     state.busy = false;
   }
   if (!result.readable) {
-    const message = step.kind === "number"
-      ? "That could not be read as a number. Type just the number, like 5.48 or -240."
-      : "That answer did not match this step. Pick from the choices shown.";
+    const messages = {
+      number: "That could not be read as a number. Type just the number, like 5.48 or -240.",
+      expression: `That formula could not be read. ${result.why || "Check the brackets and symbols."}`,
+    };
+    const message = messages[step.kind] || "That answer did not match this step. Pick from the choices shown.";
     setFeedback(form, "retype", message);
     return;
   }
@@ -621,7 +719,7 @@ async function onCheck(event, step) {
     state.stepStarted = performance.now();
     renderSteps();
     const newForm = $("steps").querySelector(".step.current form");
-    const typed = step.kind === "number" ? `You typed ${given}. ` : "";
+    const typed = step.kind === "number" || step.kind === "expression" ? `You typed ${given}. ` : "";
     setFeedback(
       newForm,
       "wrong",

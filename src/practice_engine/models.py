@@ -5,14 +5,24 @@ with a short title and made of steps, each step tagged with one skill. A choice
 step also says, for each wrong option, why it is wrong. A course may also list its
 units, each a list of lessons, and the skills each lesson teaches, following the
 course's own curriculum (for AP courses, the College Board's units and topics).
-This file describes those shapes and offers two helpers:
+
+A problem may be a template (decided 2026-11-27): its numbers change each time it is
+given, within ranges, so a skill comes back as a new version, never the exact same
+problem. Its texts have {blanks} for those numbers, and its answers are formulas
+worked out from them. A step may also ask for a formula ("expression" steps), as AP
+questions do ("derive an expression for v in terms of m, g and h").
+
+This file describes those shapes and offers these helpers:
 
 - load_course(path): read a course.json file into the shapes below. A file that is
   not valid JSON, or has a missing, misspelled or wrongly typed field, stops here
   with a plain message saying where.
 - validate_course(course): check a course that loaded against the rules every
   course must follow, and return a list of plain-English complaints. An empty
-  list means the course is sound.
+  list means the course is sound. A template is checked in every variant.
+- is_template(problem) and fill_problem(problem, variant): whether a problem's
+  numbers change, and the problem with its numbers filled in for one variant (a
+  whole number that picks the numbers; the same variant always gives the same ones).
 
 How to read this file: `name: str` means the field holds text, `int` a whole
 number, `float` a number with a decimal point, `list[str]` a list of texts,
@@ -25,15 +35,34 @@ Nothing here knows about algebra or physics, and nothing here touches the web
 server or stored data.
 """
 
+import functools
 import json
 import math
+import random
 import re
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-STEP_KINDS = ("choice", "number", "order")
+from practice_engine.formulas import (
+    FormulaError,
+    blanks_in,
+    equivalent,
+    evaluate,
+    fill,
+    names_in,
+    parse,
+)
+
+STEP_KINDS = ("choice", "number", "order", "expression")
+# A template's variants are numbered 1 to this, and every one is filled in and checked
+# when the course is checked, so a student is only ever given a checked variant.
+TEMPLATE_VARIANTS = 200
+# A number worked out by a template counts as right within this share of it (2%, as
+# online homework systems often allow), unless the step gives its own tolerance, so an
+# answer to 3 significant figures from rounded in-between values still counts.
+TEMPLATE_TOLERANCE = 0.02
 DIFFICULTIES = (1, 2, 3)  # 1 easy, 2 medium, 3 hard
 # Skill and problem ids: lowercase words or digits joined by underscores, like kinetic_energy.
 ID_PATTERN = re.compile(r"[a-z0-9]+(_[a-z0-9]+)*")
@@ -72,6 +101,12 @@ class Step(CourseShape):
       (useful when answers are rounded). Left out, the typed number must match.
     - "order": put items in order; `answer` is the list in the correct order, and
       the student sees it shuffled.
+    - "expression": type a formula; `answer` is the right formula, such as
+      "sqrt(2*g*h)", and `symbols` lists the names the student may use. Any formula
+      equal to it for every value of the symbols is right (see formulas.py).
+
+    In a template problem, a number step's `answer` may be a formula of the
+    problem's numbers, such as "0.5*m*v^2", and texts may have {blanks}.
 
     `feedback` (choice steps only) is a look-up table: wrong option -> a one-line
     message saying why that option is wrong, shown right after the student picks
@@ -95,6 +130,26 @@ class Step(CourseShape):
     # Saying why an answer is wrong teaches more than "right/wrong" alone
     # (research report, change 4).
     feedback: dict[str, str] | None = None
+    # Only expression steps have symbols: the names the student may use, like "m".
+    symbols: list[str] | None = None
+
+
+class NumberRange(CourseShape):
+    """The values a template number may take: `start`, `start` + `step`, ... up to
+    `stop`. All three are written as numbers."""
+
+    start: float
+    stop: float
+    step: float
+
+
+class Graph(CourseShape):
+    """A line graph the page draws above the steps, such as force against position.
+    Each point is [x, y]; in a template, either may be a formula of its numbers."""
+
+    x_label: str
+    y_label: str
+    points: list[list[float | str]]
 
 
 class Problem(CourseShape):
@@ -105,6 +160,14 @@ class Problem(CourseShape):
     prompt: str
     difficulty: int
     steps: list[Step]
+    # A template's changing numbers, such as {"m": {"start": 1, "stop": 3, "step": 0.5}}.
+    numbers: dict[str, NumberRange] = {}
+    # A template's changing words: one setting is picked per variant, such as
+    # [{"thing": "crate"}, {"thing": "sled"}], so the details change too.
+    settings: list[dict[str, str]] = []
+    # Values worked out from the numbers, in order, such as {"K": "0.5*m*v^2"}.
+    values: dict[str, str] = {}
+    graph: Graph | None = None
 
 
 class Lesson(CourseShape):
@@ -202,6 +265,79 @@ def _describe_location(loc: tuple) -> str:
         else:
             parts.append(f"'{name}'")
     return ", ".join(parts) or "the whole file"
+
+
+def is_template(problem: Problem) -> bool:
+    """True if the problem's numbers or words change from one variant to the next."""
+    return bool(problem.numbers or problem.settings)
+
+
+def variant_values(problem: Problem, variant: int) -> dict[str, float | str]:
+    """The numbers, words and worked-out values of one variant of a template. Stops
+    with a FormulaError if a value cannot be worked out."""
+    rng = random.Random(f"{problem.id}:{variant}")
+    values: dict[str, float | str] = {}
+    for name, span in problem.numbers.items():
+        count = int(round((span.stop - span.start) / span.step)) if span.step > 0 else 0
+        values[name] = round(span.start + rng.randint(0, max(count, 0)) * span.step, 10)
+    if problem.settings:
+        values.update(rng.choice(problem.settings))
+    for name, text in problem.values.items():
+        numeric = {k: v for k, v in values.items() if not isinstance(v, str)}
+        values[name] = evaluate(parse(text, numeric), numeric)
+    return values
+
+
+def fill_problem(problem: Problem, variant: int | None) -> Problem:
+    """The problem with one variant's numbers and words filled in. A problem that is
+    not a template comes back as it is. Stops with a FormulaError if the template
+    cannot be filled in (the course checker reports that before any student sees it).
+    """
+    if not is_template(problem):
+        return problem
+    values = variant_values(problem, variant or 0)
+    numeric = {k: v for k, v in values.items() if not isinstance(v, str)}
+
+    def text(value: str) -> str:
+        return fill(value, values)
+
+    steps = []
+    for step in problem.steps:
+        filled = step.model_copy(deep=True)
+        filled.prompt, filled.hint = text(step.prompt), text(step.hint)
+        if step.kind == "choice":
+            filled.options = [text(option) for option in step.options or []]
+            filled.answer = text(step.answer) if isinstance(step.answer, str) else step.answer
+            if step.feedback is not None:
+                filled.feedback = {text(k): text(v) for k, v in step.feedback.items()}
+        elif step.kind == "order" and isinstance(step.answer, list):
+            filled.answer = [text(item) for item in step.answer]
+        elif step.kind == "number":
+            if isinstance(step.answer, str):
+                filled.answer = evaluate(parse(step.answer, numeric), numeric)
+            if step.tolerance is None and not isinstance(filled.answer, bool):
+                filled.tolerance = max(abs(filled.answer) * TEMPLATE_TOLERANCE, 1e-9)
+        steps.append(filled)
+    graph = None
+    if problem.graph is not None:
+        points = [
+            [
+                evaluate(parse(item, numeric), numeric) if isinstance(item, str) else item
+                for item in point
+            ]
+            for point in problem.graph.points
+        ]
+        graph = Graph(
+            x_label=text(problem.graph.x_label), y_label=text(problem.graph.y_label), points=points
+        )
+    return Problem(
+        id=problem.id,
+        title=text(problem.title),
+        prompt=text(problem.prompt),
+        difficulty=problem.difficulty,
+        steps=steps,
+        graph=graph,
+    )
 
 
 def validate_course(course: Course) -> list[str]:
@@ -414,20 +550,79 @@ def _check_every_skill_is_used(course: Course) -> list[str]:
 def _check_problems_and_steps(course: Course) -> list[str]:
     complaints = []
     for problem in course.problems:
-        where = f"Problem '{problem.id}'"  # the start of every complaint about this problem
-        if not problem.prompt.strip():
-            complaints.append(f"{where}: the prompt is empty.")
-        if problem.difficulty not in DIFFICULTIES:
-            complaints.append(f"{where}: difficulty must be 1, 2 or 3, not {problem.difficulty}.")
-        if not problem.steps:
-            complaints.append(f"{where}: it has no steps.")
-        # Number the steps 1, 2, 3 the way a person counts, so a complaint says "step 1".
-        for position, step in enumerate(problem.steps, start=1):
-            complaints += _check_step(step, f"{where}, step {position}")
+        if is_template(problem) or problem.values:
+            complaints += _check_template(problem)
+            continue
+        complaints += _check_one_problem(problem)
     return complaints
 
 
-def _check_step(step: Step, where: str) -> list[str]:
+def _check_template(problem: Problem) -> list[str]:
+    """Check a template: its ranges, then many filled-in variants, each by the same
+    rules as an ordinary problem. Each complaint is given once."""
+    where = f"Problem '{problem.id}'"
+    complaints = []
+    for name, span in problem.numbers.items():
+        if not (span.step > 0 and span.stop >= span.start):
+            complaints.append(
+                f"{where}: number '{name}' needs a step above 0 and a stop at or above its start."
+            )
+    if not problem.numbers and not problem.settings:
+        complaints.append(f"{where}: it has worked-out values but no numbers or settings.")
+    if complaints:
+        return complaints
+    seen: dict[str, None] = {}  # complaints in order, each once
+    for variant in range(1, TEMPLATE_VARIANTS + 1):
+        try:
+            filled = fill_problem(problem, variant)
+        except FormulaError as error:
+            seen[f"{where}, variant {variant}: {error}"] = None
+            break
+        for complaint in _check_one_problem(filled, template=True):
+            seen.setdefault(complaint, None)
+    return list(seen)
+
+
+def _check_one_problem(problem: Problem, template: bool = False) -> list[str]:
+    """Check one problem that is not a template, or one filled-in variant of one."""
+    complaints = []
+    where = f"Problem '{problem.id}'"  # the start of every complaint about this problem
+    if not problem.prompt.strip():
+        complaints.append(f"{where}: the prompt is empty.")
+    if problem.difficulty not in DIFFICULTIES:
+        complaints.append(f"{where}: difficulty must be 1, 2 or 3, not {problem.difficulty}.")
+    if not problem.steps:
+        complaints.append(f"{where}: it has no steps.")
+    # Number the steps 1, 2, 3 the way a person counts, so a complaint says "step 1".
+    for position, step in enumerate(problem.steps, start=1):
+        complaints += _check_step(step, f"{where}, step {position}", template)
+    if problem.graph is not None:
+        complaints += _check_graph(problem, where)
+    texts = [problem.title, problem.prompt] + [s.prompt for s in problem.steps]
+    if any(blanks_in(text) for text in texts):
+        complaints.append(
+            f"{where}: a text has a {{blank}} but the problem has no numbers to fill it."
+        )
+    return complaints
+
+
+def _check_graph(problem: Problem, where: str) -> list[str]:
+    graph = problem.graph
+    complaints = []
+    if not graph.x_label.strip() or not graph.y_label.strip():
+        complaints.append(f"{where}: the graph needs a label on each axis.")
+    if len(graph.points) < 2 or any(len(point) != 2 for point in graph.points):
+        complaints.append(f"{where}: the graph needs at least 2 points, each [x, y].")
+    elif not all(
+        isinstance(value, int | float) and math.isfinite(value)
+        for point in graph.points
+        for value in point
+    ):
+        complaints.append(f"{where}: every graph point must be an ordinary number.")
+    return complaints
+
+
+def _check_step(step: Step, where: str, template: bool = False) -> list[str]:
     """Check one step. `where` starts every complaint, like "Problem 'push_cart', step 3"."""
     complaints = []
     if not step.prompt.strip():
@@ -447,13 +642,46 @@ def _check_step(step: Step, where: str) -> list[str]:
         complaints.append(f"{where}: only 'number' steps may have a tolerance.")
     if step.kind != "choice" and step.feedback is not None:
         complaints.append(f"{where}: only 'choice' steps may have feedback.")
+    if step.kind != "expression" and step.symbols is not None:
+        complaints.append(f"{where}: only 'expression' steps may have symbols.")
     if step.kind == "choice":
         complaints += _check_choice(step, where)
     elif step.kind == "number":
-        complaints += _check_number(step, where)
+        complaints += _check_number(step, where, template)
+    elif step.kind == "expression":
+        complaints += _check_expression(step, where)
     else:  # kind is "order", the only kind left
         complaints += _check_order(step, where)
     return complaints
+
+
+@functools.cache
+def _answer_can_be_checked(answer: str, symbols: tuple[str, ...]) -> bool:
+    """The formula can be worked out at enough values to compare typed answers with it.
+    Kept once per formula: a template's every variant asks the same."""
+    return equivalent(answer, answer, symbols)
+
+
+def _check_expression(step: Step, where: str) -> list[str]:
+    """An expression step lists its symbols, and its answer is a formula of them."""
+    symbols = step.symbols or []
+    if not symbols or any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", s) for s in symbols):
+        return [f"{where}: an expression step needs symbols, each a name like 'm' or 'v0'."]
+    if not isinstance(step.answer, str):
+        return [f"{where}: an expression step's answer must be a formula written as text."]
+    try:
+        formula = parse(step.answer, symbols)
+    except FormulaError as error:
+        return [f"{where}: the answer formula cannot be read: {error}"]
+    unused = set(symbols) - names_in(formula)
+    if unused:
+        return [f"{where}: the symbols {sorted(unused)} are listed but not in the answer."]
+    if not _answer_can_be_checked(step.answer, tuple(symbols)):
+        return [
+            f"{where}: the answer formula cannot be worked out for most values of its "
+            "symbols, so no typed answer could be checked."
+        ]
+    return []
 
 
 def _repeats(texts: list[str]) -> bool:
@@ -513,7 +741,7 @@ def _check_feedback(step: Step, options: list[str], where: str) -> list[str]:
     return complaints
 
 
-def _check_number(step: Step, where: str) -> list[str]:
+def _check_number(step: Step, where: str, template: bool = False) -> list[str]:
     answer = step.answer
     # int is a whole number, float a number with a decimal point. A true/false or a
     # number written in quotes is neither.
@@ -524,8 +752,10 @@ def _check_number(step: Step, where: str) -> list[str]:
         ]
     if not math.isfinite(answer):
         return [f"{where}: the answer must be an ordinary number."]
-    # Rounding to two decimals changes the number only if it had more than two.
-    if round(answer, 2) != answer:
+    # Rounding to two decimals changes the number only if it had more than two. A
+    # template works its answers out, so they may have more (they are checked within
+    # TEMPLATE_TOLERANCE instead).
+    if not template and round(answer, 2) != answer:
         return [f"{where}: the answer {answer} has more than two decimals."]
     tolerance = step.tolerance
     if tolerance is not None and not (math.isfinite(tolerance) and tolerance > 0):
@@ -577,3 +807,6 @@ class StepAnswer(CourseShape):
     # Which try at this step this was: 1 is the first try, 2 the second, and so on
     # (never below 1). Only the first try changes mastery (see mastery.py).
     attempt: int = Field(default=1, ge=1)
+    # Which version of a template problem was answered (see fill_problem); None for
+    # a problem whose numbers never change.
+    variant: int | None = None

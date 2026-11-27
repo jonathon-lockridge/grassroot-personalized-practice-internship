@@ -92,11 +92,46 @@
     {
       "id": "push_cart",
       "title": "Pushing a cart",
-      "prompt": "A 2.0 kg cart starts at rest on a frictionless track. You push it with a constant 10 N horizontal force for 3.0 m.",
+      "prompt": "A {m} kg {thing} starts at rest on a frictionless {track}. You push it with a constant {F} N horizontal force for {d} m.",
       "difficulty": 1,
+      "numbers": {
+        "m": {
+          "start": 1,
+          "stop": 4,
+          "step": 0.5
+        },
+        "F": {
+          "start": 6,
+          "stop": 20,
+          "step": 2
+        },
+        "d": {
+          "start": 1.5,
+          "stop": 4,
+          "step": 0.5
+        }
+      },
+      "settings": [
+        {
+          "thing": "cart",
+          "track": "track"
+        },
+        {
+          "thing": "glider",
+          "track": "air track"
+        },
+        {
+          "thing": "hockey puck",
+          "track": "ice rink"
+        }
+      ],
+      "values": {
+        "W": "F*d",
+        "v": "sqrt(2*W/m)"
+      },
       "steps": [
         {
-          "prompt": "Which principle links your push to the cart's final speed, using the force and the distance but not the time?",
+          "prompt": "Which principle links your push to the {thing}'s final speed, using the force and the distance but not the time?",
           "kind": "choice",
           "options": [
             "Conservation of mechanical energy",
@@ -106,38 +141,252 @@
           ],
           "answer": "Work-energy theorem (net work equals change in kinetic energy)",
           "feedback": {
-            "Conservation of mechanical energy": "Mechanical energy isn't conserved here: your push does work on the cart and adds energy.",
+            "Conservation of mechanical energy": "Mechanical energy isn't conserved here: your push does work on the {thing} and adds energy.",
             "Conservation of momentum": "Momentum isn't conserved here: your push is an outside force.",
-            "Impulse-momentum theorem (impulse equals change in momentum)": "Impulse needs how long the push lasts, and you know the distance, not the time."
+            "Impulse-momentum theorem (impulse equals change in momentum)": "You'd first need the time from kinematics. Work-energy uses the force and the distance directly."
           },
-          "hint": "You know a force and a distance. Force times distance is work, and the net work on the cart changes its kinetic energy.",
+          "hint": "You know a force and a distance. Force times distance is work, and the net work on the {thing} changes its kinetic energy.",
           "skill": "choose_principle"
         },
         {
-          "prompt": "How much work, in joules, does your push do on the cart?",
+          "prompt": "How much work does your push do on the {thing}, in joules?",
           "kind": "number",
-          "answer": 30,
-          "hint": "The force points along the motion, so W = Fd = 10 × 3.0.",
+          "answer": "W",
+          "hint": "The force points along the motion, so W = Fd = {F} × {d}.",
           "skill": "work_constant_force"
         },
         {
-          "prompt": "What is the cart's final speed, in m/s?",
+          "prompt": "Derive an expression for the {thing}'s final speed, in terms of F, d and m.",
+          "kind": "expression",
+          "answer": "sqrt(2*F*d/m)",
+          "symbols": ["F", "d", "m"],
+          "hint": "All the work becomes kinetic energy: ½mv² = Fd. Solve for v.",
+          "skill": "kinetic_energy"
+        },
+        {
+          "prompt": "What is the {thing}'s final speed, in m/s?",
           "kind": "number",
-          "answer": 5.48,
-          "tolerance": 0.05,
-          "hint": "All 30 J becomes kinetic energy: ½(2.0)v² = 30, so v = √30.",
+          "answer": "v",
+          "hint": "½({m})v² = {W} J, so v = √(2 × {W} / {m}).",
+          "skill": "kinetic_energy"
+        },
+        {
+          "prompt": "If the {thing} had twice the mass, with the same push over the same distance, how would its final speed change?",
+          "kind": "choice",
+          "options": [
+            "It would be 1/√2 ≈ 0.71 times as large",
+            "It would be half as large",
+            "It would be the same",
+            "It would be twice as large"
+          ],
+          "answer": "It would be 1/√2 ≈ 0.71 times as large",
+          "feedback": {
+            "It would be half as large": "The work Fd is the same, so ½mv² is the same: doubling m divides v² by 2, so v is divided by √2, not 2.",
+            "It would be the same": "The push does the same work, but the same kinetic energy in twice the mass means a lower speed.",
+            "It would be twice as large": "A heavier {thing} speeds up less: the same work goes into twice the mass."
+          },
+          "hint": "From your formula, v = √(2Fd/m). What happens to v when m is doubled?",
           "skill": "kinetic_energy"
         }
       ]
     },
     {
-      "id": "drag_crate",
-      "title": "Dragging a crate with a rope",
-      "prompt": "A 15 kg crate starts at rest. A rope pulls it 8.0 m across a level floor with a 50 N force at 37° above the horizontal. Friction on the crate is 30 N. Use cos 37° = 4/5.",
-      "difficulty": 1,
+      "id": "force_graph",
+      "title": "A push shown on a graph",
+      "prompt": "A {m} kg {thing} starts at rest on a frictionless {track}. A horizontal force acts on it along the x-axis. The graph shows the force F against the position x, from x = 0 to x = {c} m. A negative F points backward.",
+      "difficulty": 2,
+      "numbers": {
+        "m": {
+          "start": 0.5,
+          "stop": 2,
+          "step": 0.5
+        },
+        "F0": {
+          "start": 4,
+          "stop": 12,
+          "step": 2
+        },
+        "a": {
+          "start": 1,
+          "stop": 2,
+          "step": 0.5
+        },
+        "flat": {
+          "start": 1,
+          "stop": 3,
+          "step": 1
+        },
+        "p": {
+          "start": 1,
+          "stop": 2,
+          "step": 1
+        },
+        "q": {
+          "start": 0.5,
+          "stop": 1,
+          "step": 0.5
+        }
+      },
+      "settings": [
+        {
+          "thing": "cart",
+          "track": "track"
+        },
+        {
+          "thing": "glider",
+          "track": "air track"
+        },
+        {
+          "thing": "puck",
+          "track": "sheet of ice"
+        }
+      ],
+      "values": {
+        "b": "a + flat",
+        "z": "a + flat + p",
+        "c": "a + flat + p + q",
+        "F1": "F0*q/p",
+        "Wa": "0.5*a*F0",
+        "W": "0.5*a*F0 + flat*F0 + 0.5*p*F0 - 0.5*q*F0*q/p",
+        "v": "sqrt(2*W/m)"
+      },
+      "graph": {
+        "x_label": "x (m)",
+        "y_label": "F (N)",
+        "points": [[0, 0], ["a", "F0"], ["b", "F0"], ["z", 0], ["c", "-F1"]]
+      },
       "steps": [
         {
-          "prompt": "Which principle links the rope's pull, friction and the 8.0 m to the crate's final speed?",
+          "prompt": "Which principle links the force on the graph to the {thing}'s speed at x = {c} m?",
+          "kind": "choice",
+          "options": [
+            "Conservation of mechanical energy",
+            "Work-energy theorem (net work equals change in kinetic energy)",
+            "Conservation of momentum",
+            "Impulse-momentum theorem (impulse equals change in momentum)"
+          ],
+          "answer": "Work-energy theorem (net work equals change in kinetic energy)",
+          "feedback": {
+            "Conservation of mechanical energy": "Mechanical energy isn't conserved: the push is an outside force that adds energy.",
+            "Conservation of momentum": "Momentum isn't conserved: the push is an outside force on the {thing}.",
+            "Impulse-momentum theorem (impulse equals change in momentum)": "Impulse needs force against time, and this graph gives force against position."
+          },
+          "hint": "The graph gives force against position. A force over a distance does work, and net work changes kinetic energy.",
+          "skill": "choose_principle"
+        },
+        {
+          "prompt": "How do you find the work the force does from x = 0 to x = {c} m?",
+          "kind": "choice",
+          "options": [
+            "The area between the F–x graph and the x-axis from x = 0 to x = {c} m, counting area below the axis as negative",
+            "The slope of the F–x graph",
+            "The largest force times {c} m"
+          ],
+          "answer": "The area between the F–x graph and the x-axis from x = 0 to x = {c} m, counting area below the axis as negative",
+          "feedback": {
+            "The slope of the F–x graph": "The slope says how fast the force changes with position, not how much work it does.",
+            "The largest force times {c} m": "That treats the force as {F0} N the whole way, but it starts at 0, drops back to 0 and then points backward."
+          },
+          "hint": "Work is ∫F dx, which is the area between the graph and the x-axis.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "How much work does the force do from x = 0 to x = {a} m, in joules?",
+          "kind": "number",
+          "answer": "Wa",
+          "hint": "That part of the graph is a triangle: area = ½ × {a} m × {F0} N.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "How much work does the force do from x = 0 to x = {c} m, in joules?",
+          "kind": "number",
+          "answer": "W",
+          "hint": "Add the areas above the axis (a triangle, a rectangle and a triangle) and subtract the small triangle below the axis, ½ × {q} × {F1}.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "What is the {thing}'s speed at x = {c} m, in m/s?",
+          "kind": "number",
+          "answer": "v",
+          "hint": "All {W:.2f} J of net work becomes kinetic energy: ½({m})v² = {W:.2f}.",
+          "skill": "work_energy_theorem"
+        },
+        {
+          "prompt": "Where between x = 0 and x = {c} m is the {thing} moving fastest?",
+          "kind": "choice",
+          "options": [
+            "At x = {z} m, where the force drops to zero",
+            "At x = {c} m, at the end of the push",
+            "At x = {a} m, where the force first reaches its largest value",
+            "Anywhere from x = {a} m to x = {b} m, because the force is constant there"
+          ],
+          "answer": "At x = {z} m, where the force drops to zero",
+          "feedback": {
+            "At x = {c} m, at the end of the push": "After x = {z} m the force points backward, so it does negative work and the {thing} slows down.",
+            "At x = {a} m, where the force first reaches its largest value": "The largest force means the largest acceleration, not the largest speed. The {thing} keeps speeding up after that.",
+            "Anywhere from x = {a} m to x = {b} m, because the force is constant there": "A constant forward force means constant acceleration, so the speed keeps growing there."
+          },
+          "hint": "Ask, at each part of the graph: is the force speeding the {thing} up or slowing it down?",
+          "skill": "work_energy_theorem"
+        }
+      ]
+    },
+    {
+      "id": "drag_crate",
+      "title": "Pulling at an angle",
+      "prompt": "A {m} kg {thing} starts at rest on a level {surface}. A rope pulls it {d} m with a constant {F} N force at θ = {theta}° above the horizontal, and the {thing} slides. The coefficient of kinetic friction between the {thing} and the {surface} is μ = {mu:.2f}. Use g = 9.8 m/s².",
+      "difficulty": 2,
+      "numbers": {
+        "m": {
+          "start": 15,
+          "stop": 25,
+          "step": 2.5
+        },
+        "F": {
+          "start": 70,
+          "stop": 110,
+          "step": 10
+        },
+        "theta": {
+          "start": 25,
+          "stop": 40,
+          "step": 5
+        },
+        "mu": {
+          "start": 0.1,
+          "stop": 0.25,
+          "step": 0.05
+        },
+        "d": {
+          "start": 2,
+          "stop": 6,
+          "step": 1
+        }
+      },
+      "settings": [
+        {
+          "thing": "crate",
+          "surface": "warehouse floor"
+        },
+        {
+          "thing": "sled",
+          "surface": "packed-snow path"
+        },
+        {
+          "thing": "trunk",
+          "surface": "wooden floor"
+        }
+      ],
+      "values": {
+        "rad": "theta*pi/180",
+        "N": "m*9.8 - F*sin(rad)",
+        "Wrope": "F*d*cos(rad)",
+        "Wfric": "-mu*N*d",
+        "v": "sqrt(2*(Wrope + Wfric)/m)"
+      },
+      "steps": [
+        {
+          "prompt": "Which principle links the rope's pull, friction and the {d} m to the {thing}'s final speed?",
           "kind": "choice",
           "options": [
             "Conservation of mechanical energy",
@@ -148,55 +397,81 @@
           "answer": "Work-energy theorem (net work equals change in kinetic energy)",
           "feedback": {
             "Conservation of mechanical energy": "Mechanical energy isn't conserved: the rope adds energy and friction turns some into heat.",
-            "Conservation of momentum": "Momentum isn't conserved: the rope and friction are outside forces on the crate.",
+            "Conservation of momentum": "Momentum isn't conserved: the rope and friction are outside forces on the {thing}.",
             "Impulse-momentum theorem (impulse equals change in momentum)": "Impulse needs how long the forces act, and you know the distance, not the time."
           },
-          "hint": "Forces acting over a distance do work. Add up every force's work, and the total changes the crate's kinetic energy.",
+          "hint": "Forces acting over a distance do work. Add up every force's work, and the total changes the {thing}'s kinetic energy.",
           "skill": "choose_principle"
         },
         {
-          "prompt": "How much work, in joules, does the rope do on the crate?",
+          "prompt": "Derive an expression for the normal force on the {thing}, in terms of m, g, F and θ.",
+          "kind": "expression",
+          "answer": "m*g - F*sin(theta)",
+          "symbols": ["m", "g", "F", "theta"],
+          "hint": "Nothing moves up or down, so the vertical forces balance: N + F sin θ = mg. The rope lifts part of the weight.",
+          "skill": "newtons_laws"
+        },
+        {
+          "prompt": "How much work does the rope do on the {thing}, in joules?",
           "kind": "number",
-          "answer": 320,
-          "hint": "Only the part of the force along the motion does work: W = Fd cos θ = 50 × 8.0 × 4/5.",
+          "answer": "Wrope",
+          "hint": "Only the part of the pull along the motion does work: W = Fd cos θ = {F} × {d} × cos {theta}°.",
           "skill": "work_constant_force"
         },
         {
-          "prompt": "Is the work done by friction on the crate positive, negative or zero?",
+          "prompt": "How much work do gravity and the normal force do on the {thing}?",
           "kind": "choice",
           "options": [
-            "Negative, because friction points opposite the motion",
-            "Positive, because the crate moves",
-            "Zero, because friction is not a push or a pull"
+            "None, because each force is perpendicular to the motion",
+            "Gravity does negative work, because it pulls down on the {thing}",
+            "The normal force does positive work, because it pushes up on the {thing}",
+            "Each does work, but the two amounts cancel"
           ],
-          "answer": "Negative, because friction points opposite the motion",
+          "answer": "None, because each force is perpendicular to the motion",
           "feedback": {
-            "Positive, because the crate moves": "Moving is not enough: work is positive only when the force points along the motion.",
-            "Zero, because friction is not a push or a pull": "Friction is a force that acts along the path, so it does work."
+            "Gravity does negative work, because it pulls down on the {thing}": "Work needs a force along the motion. The {thing} moves sideways and gravity points straight down, so cos 90° = 0.",
+            "The normal force does positive work, because it pushes up on the {thing}": "The normal force points straight up and the {thing} moves sideways, so it does no work.",
+            "Each does work, but the two amounts cancel": "Neither does any work at all: both are perpendicular to the motion, so W = Fd cos 90° = 0 for each."
           },
-          "hint": "Work is negative when the force points against the motion (cos 180° = −1).",
+          "hint": "W = Fd cos θ, where θ is the angle between the force and the motion.",
           "skill": "work_constant_force"
         },
         {
-          "prompt": "How much work, in joules, does friction do on the crate? Include the sign.",
-          "kind": "number",
-          "answer": -240,
-          "hint": "W = 30 × 8.0 × cos 180°.",
+          "prompt": "Suppose the rope pulled horizontally with the same {F} N force instead. How would the size of the work done by friction change?",
+          "kind": "choice",
+          "options": [
+            "It would be larger, because the normal force would grow to mg",
+            "It would be smaller, because a horizontal pull moves the {thing} more easily",
+            "It would be the same, because friction depends only on μ and the distance"
+          ],
+          "answer": "It would be larger, because the normal force would grow to mg",
+          "feedback": {
+            "It would be smaller, because a horizontal pull moves the {thing} more easily": "Friction's size is μN, and it does not depend on how easily the {thing} moves. A horizontal rope no longer lifts, so N goes up.",
+            "It would be the same, because friction depends only on μ and the distance": "Friction is μN, and N depends on the rope: pulling upward at an angle lifts part of the weight and lowers N."
+          },
+          "hint": "Friction's size is μN. Write N for the angled rope and for a horizontal rope, then compare.",
           "skill": "work_constant_force"
         },
         {
-          "prompt": "How much work, in joules, does gravity do on the crate?",
+          "prompt": "How much work does friction do on the {thing}, in joules? Include the sign.",
           "kind": "number",
-          "answer": 0,
-          "hint": "Gravity points down and the crate moves sideways: the angle is 90°, and cos 90° = 0.",
+          "answer": "Wfric",
+          "hint": "W = −μNd, with N = mg − F sin θ = {N:.1f} N.",
           "skill": "work_constant_force"
         },
         {
-          "prompt": "What is the crate's speed after the 8.0 m, in m/s?",
+          "prompt": "Derive an expression for the {thing}'s speed after it moves a distance d, in terms of F, θ, μ, m, g and d.",
+          "kind": "expression",
+          "answer": "sqrt(2*d*(F*cos(theta) - mu*(m*g - F*sin(theta)))/m)",
+          "symbols": ["F", "theta", "mu", "m", "g", "d"],
+          "hint": "Net work = Fd cos θ − μ(mg − F sin θ)d, and it all becomes kinetic energy: ½mv² = net work.",
+          "skill": "work_energy_theorem"
+        },
+        {
+          "prompt": "What is the {thing}'s speed after {d} m, in m/s?",
           "kind": "number",
-          "answer": 3.27,
-          "tolerance": 0.05,
-          "hint": "Net work = 320 − 240 = 80 J, and it all becomes kinetic energy: ½(15)v² = 80.",
+          "answer": "v",
+          "hint": "Net work = {Wrope:.0f} J + ({Wfric:.0f} J). Set ½({m})v² equal to it.",
           "skill": "work_energy_theorem"
         }
       ]
@@ -204,11 +479,32 @@
     {
       "id": "changing_force",
       "title": "A force that grows with distance",
-      "prompt": "A 3.0 kg block starts at rest on a frictionless surface. A force F(x) = 6x² (in newtons, with x in meters) pushes it along the x-axis from x = 0 to x = 2.0 m.",
-      "difficulty": 2,
+      "prompt": "A {m} kg block starts at rest on a frictionless surface. A force F(x) = αx², with α = {alpha} N/m², pushes it along the x-axis from x = 0 to x = D = {D} m.",
+      "difficulty": 3,
+      "numbers": {
+        "m": {
+          "start": 1,
+          "stop": 4,
+          "step": 0.5
+        },
+        "alpha": {
+          "start": 2,
+          "stop": 8,
+          "step": 1
+        },
+        "D": {
+          "start": 1,
+          "stop": 3,
+          "step": 0.5
+        }
+      },
+      "values": {
+        "W": "alpha*D^3/3",
+        "v": "sqrt(2*W/m)"
+      },
       "steps": [
         {
-          "prompt": "Which principle links the force F(x) over the 2.0 m to the block's speed at x = 2.0 m?",
+          "prompt": "Which principle links the force F(x) over the distance D to the block's speed at x = D?",
           "kind": "choice",
           "options": [
             "Conservation of mechanical energy",
@@ -229,31 +525,64 @@
           "prompt": "How do you find the work done by this force?",
           "kind": "choice",
           "options": [
-            "Integrate F(x) dx from x = 0 to x = 2.0 m",
-            "Multiply the force at x = 2.0 m by 2.0 m",
-            "Multiply the average of F(0) and F(2.0) by 2.0 m"
+            "Integrate F(x) dx from x = 0 to x = D",
+            "Multiply the force at x = D by D",
+            "Multiply the average of F(0) and F(D) by D"
           ],
-          "answer": "Integrate F(x) dx from x = 0 to x = 2.0 m",
+          "answer": "Integrate F(x) dx from x = 0 to x = D",
           "feedback": {
-            "Multiply the force at x = 2.0 m by 2.0 m": "That works only for a constant force, and this force changes with x.",
-            "Multiply the average of F(0) and F(2.0) by 2.0 m": "Averaging the two ends works only for a force that grows in a straight line, and 6x² curves."
+            "Multiply the force at x = D by D": "That works only for a constant force, and this force changes with x.",
+            "Multiply the average of F(0) and F(D) by D": "Averaging the two ends works only for a force that grows in a straight line, and αx² curves."
           },
-          "hint": "The force changes as the block moves, so add up F dx over every small bit of the path. Averaging the two ends only works for a straight-line force.",
+          "hint": "The force changes as the block moves, so add up F dx over every small bit of the path.",
           "skill": "work_variable_force"
         },
         {
-          "prompt": "How much work, in joules, does the force do?",
-          "kind": "number",
-          "answer": 16,
-          "hint": "∫6x² dx = 2x³. Evaluate from 0 to 2.0: 2(8) − 0.",
+          "prompt": "Derive an expression for the work done by the force from x = 0 to x = D, in terms of α and D.",
+          "kind": "expression",
+          "answer": "alpha*D^3/3",
+          "symbols": ["alpha", "D"],
+          "hint": "∫αx² dx = αx³/3. Evaluate it from 0 to D.",
           "skill": "work_variable_force"
         },
         {
-          "prompt": "What is the block's speed at x = 2.0 m, in m/s?",
+          "prompt": "How much work does the force do, in joules?",
           "kind": "number",
-          "answer": 3.27,
-          "tolerance": 0.05,
-          "hint": "The 16 J of work becomes kinetic energy: ½(3.0)v² = 16.",
+          "answer": "W",
+          "hint": "W = αD³/3 = {alpha} × {D}³ / 3.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "Derive an expression for the block's speed at x = D, in terms of α, D and m.",
+          "kind": "expression",
+          "answer": "sqrt(2*alpha*D^3/(3*m))",
+          "symbols": ["alpha", "D", "m"],
+          "hint": "All the work becomes kinetic energy: ½mv² = αD³/3. Solve for v.",
+          "skill": "work_energy_theorem"
+        },
+        {
+          "prompt": "What is the block's speed at x = D = {D} m, in m/s?",
+          "kind": "number",
+          "answer": "v",
+          "hint": "½({m})v² = {W:.2f} J.",
+          "skill": "work_energy_theorem"
+        },
+        {
+          "prompt": "If the force pushed the block twice as far (to x = 2D), how would the block's final speed change?",
+          "kind": "choice",
+          "options": [
+            "It would be about 2.8 times as large (2√2)",
+            "It would be 2 times as large",
+            "It would be 4 times as large",
+            "It would be 8 times as large"
+          ],
+          "answer": "It would be about 2.8 times as large (2√2)",
+          "feedback": {
+            "It would be 2 times as large": "The work is not proportional to D: it grows as D³, and the speed as the square root of that.",
+            "It would be 4 times as large": "4 would fit a speed proportional to D², but v grows as √(D³) = D^1.5.",
+            "It would be 8 times as large": "8 times is how the work grows (D³). The speed grows as the square root of the work: √8 ≈ 2.8."
+          },
+          "hint": "v is proportional to √(D³) = D^1.5. Doubling D multiplies v by 2^1.5.",
           "skill": "work_energy_theorem"
         }
       ]
@@ -1262,12 +1591,44 @@
     },
     {
       "id": "foam_bumper",
-      "title": "Cart into a foam bumper",
-      "prompt": "A 0.50 kg cart rolls at 4.0 m/s along a frictionless track into a foam bumper. The foam crushes and does not spring back. When squeezed a distance x (in meters), it pushes back on the cart with a force of 50x² newtons.",
-      "difficulty": 2,
+      "title": "Into a foam bumper",
+      "prompt": "A {m} kg {thing} moves at v₀ = {v0} m/s along a frictionless track into a foam bumper. The foam crushes and does not spring back. When squeezed a distance x, it pushes back on the {thing} with a force of size βx², where β = {beta} N/m².",
+      "difficulty": 3,
+      "numbers": {
+        "m": {
+          "start": 0.25,
+          "stop": 1,
+          "step": 0.25
+        },
+        "v0": {
+          "start": 2,
+          "stop": 5,
+          "step": 0.5
+        },
+        "beta": {
+          "start": 2000,
+          "stop": 10000,
+          "step": 1000
+        }
+      },
+      "settings": [
+        {
+          "thing": "cart"
+        },
+        {
+          "thing": "toy car"
+        },
+        {
+          "thing": "glider"
+        }
+      ],
+      "values": {
+        "K": "0.5*m*v0^2",
+        "d": "(3*K/beta)^(1/3)"
+      },
       "steps": [
         {
-          "prompt": "Which principle links the cart's starting speed to how far it squeezes the foam, given the foam's force F(x)?",
+          "prompt": "Which principle links the {thing}'s starting speed to how far it squeezes the foam, given the foam's force?",
           "kind": "choice",
           "options": [
             "Conservation of mechanical energy",
@@ -1278,48 +1639,55 @@
           "answer": "Work-energy theorem (net work equals change in kinetic energy)",
           "feedback": {
             "Conservation of mechanical energy": "Mechanical energy isn't conserved: the foam crushes and doesn't spring back, so it stores no potential energy.",
-            "Conservation of momentum": "Momentum isn't conserved: the bumper is an outside force that stops the cart.",
+            "Conservation of momentum": "Momentum isn't conserved: the bumper is an outside force that stops the {thing}.",
             "Impulse-momentum theorem (impulse equals change in momentum)": "Impulse needs the force as a function of time, and here it is given as a function of distance."
           },
-          "hint": "The foam's force is given along the path. A force over a distance does work, and that work takes away the cart's kinetic energy.",
+          "hint": "The foam's force is given along the path. A force over a distance does work, and that work takes away the {thing}'s kinetic energy.",
           "skill": "choose_principle"
         },
         {
-          "prompt": "How do you find the work the foam does on the cart while it is squeezed a distance d?",
+          "prompt": "Which gives the work the foam does on the {thing} while it is squeezed a distance d?",
           "kind": "choice",
           "options": [
-            "−∫50x² dx from x = 0 to x = d",
-            "−50d² × d",
-            "−½ × 50d² × d"
+            "−∫βx² dx from x = 0 to x = d",
+            "−βd² × d",
+            "−½ × βd² × d"
           ],
-          "answer": "−∫50x² dx from x = 0 to x = d",
+          "answer": "−∫βx² dx from x = 0 to x = d",
           "feedback": {
-            "−50d² × d": "That uses the biggest force, 50d², for the whole squeeze, but the force starts at zero and grows.",
-            "−½ × 50d² × d": "Half the biggest force works only for a force that grows in a straight line, and 50x² curves."
+            "−βd² × d": "That uses the biggest force, βd², for the whole squeeze, but the force starts at zero and grows.",
+            "−½ × βd² × d": "Half the biggest force works only for a force that grows in a straight line, and βx² curves."
           },
-          "hint": "The force changes as the foam squeezes, so add up F dx over every small bit of the squeeze. The work is negative because the foam pushes against the motion.",
+          "hint": "The force changes as the foam squeezes, so add up F dx. The work is negative because the foam pushes against the motion.",
           "skill": "work_variable_force"
         },
         {
-          "prompt": "What is the cart's kinetic energy just before it reaches the bumper, in joules?",
+          "prompt": "What is the {thing}'s kinetic energy just before it reaches the bumper, in joules?",
           "kind": "number",
-          "answer": 4,
-          "hint": "K = ½mv² = ½ × 0.50 × 4.0².",
+          "answer": "K",
+          "hint": "K = ½mv₀² = ½ × {m} × {v0}².",
           "skill": "kinetic_energy"
         },
         {
-          "prompt": "How much work, in joules, does the foam do on the cart by the time the cart stops? Include the sign.",
+          "prompt": "How much work does the foam do on the {thing} by the time it stops, in joules? Include the sign.",
           "kind": "number",
-          "answer": -4,
-          "hint": "The foam is the only force doing work, and the cart stops, so its work equals ΔK = 0 − 4 J.",
+          "answer": "-K",
+          "hint": "The foam is the only force doing work, and the {thing} stops, so its work equals ΔK = 0 − {K:.2f} J.",
           "skill": "work_energy_theorem"
         },
         {
-          "prompt": "How far, in meters, does the cart squeeze the foam?",
+          "prompt": "Derive an expression for how far the {thing} squeezes the foam, d, in terms of m, v₀ and β.",
+          "kind": "expression",
+          "answer": "(3*m*v0^2/(2*beta))^(1/3)",
+          "symbols": ["m", "v0", "beta"],
+          "hint": "−∫βx² dx from 0 to d is −βd³/3. Set it equal to −½mv₀² and solve for d.",
+          "skill": "work_variable_force"
+        },
+        {
+          "prompt": "How far does the {thing} squeeze the foam, in meters?",
           "kind": "number",
-          "answer": 0.62,
-          "tolerance": 0.01,
-          "hint": "−∫50x² dx from 0 to d is −(50/3)d³. Set it equal to −4: d³ = 0.24, so d = ∛0.24.",
+          "answer": "d",
+          "hint": "βd³/3 = {K:.2f} J, so d³ = 3 × {K:.2f} / {beta}.",
           "skill": "work_variable_force"
         }
       ]
@@ -1522,9 +1890,7 @@
         {
           "id": "2_1_center_of_mass",
           "title": "2.1 Systems and Center of Mass",
-          "skills": [
-            "center_of_mass"
-          ],
+          "skills": ["center_of_mass"],
           "notes": [
             "A system is the set of objects you choose to study; forces between them are internal.",
             "Center of mass: x_cm = Σmx / Σm for separate masses, x_cm = (∫x λ dx) / M for a rod.",
@@ -1534,9 +1900,7 @@
         {
           "id": "2_5_newtons_second_law",
           "title": "2.5 Newton's Second Law (with 2.7 Friction)",
-          "skills": [
-            "newtons_laws"
-          ],
+          "skills": ["newtons_laws"],
           "notes": [
             "Net force equals mass times acceleration: ΣF = ma, in each direction separately.",
             "Balanced forces (ΣF = 0) mean constant velocity, including at rest.",
@@ -1551,9 +1915,7 @@
         {
           "id": "3_1_kinetic_energy",
           "title": "3.1 Translational Kinetic Energy",
-          "skills": [
-            "kinetic_energy"
-          ],
+          "skills": ["kinetic_energy"],
           "notes": [
             "Kinetic energy is the energy of motion: K = ½mv².",
             "It is never negative, and doubling the speed makes it four times as big."
@@ -1562,11 +1924,7 @@
         {
           "id": "3_2_work",
           "title": "3.2 Work",
-          "skills": [
-            "work_constant_force",
-            "work_variable_force",
-            "work_energy_theorem"
-          ],
+          "skills": ["work_constant_force", "work_variable_force", "work_energy_theorem"],
           "notes": [
             "Constant force: W = Fd cos θ. It is negative when the force points against the motion.",
             "Changing force: W = ∫F dx, the area under the force-position graph.",
@@ -1576,10 +1934,7 @@
         {
           "id": "3_3_potential_energy",
           "title": "3.3 Potential Energy",
-          "skills": [
-            "potential_energy",
-            "force_from_potential"
-          ],
+          "skills": ["potential_energy", "force_from_potential"],
           "notes": [
             "Near Earth, gravitational potential energy changes by ΔU = mgΔy.",
             "A spring stretched or squeezed by x stores U = ½kx².",
@@ -1589,10 +1944,7 @@
         {
           "id": "3_4_conservation_of_energy",
           "title": "3.4 Conservation of Energy",
-          "skills": [
-            "energy_conservation",
-            "nonconservative_work"
-          ],
+          "skills": ["energy_conservation", "nonconservative_work"],
           "notes": [
             "With only gravity and springs doing work, K + U stays the same.",
             "Friction takes energy out: K₁ + U₁ + W_friction = K₂ + U₂, where W_friction is negative."
@@ -1601,9 +1953,7 @@
         {
           "id": "3_5_power",
           "title": "3.5 Power",
-          "skills": [
-            "power"
-          ],
+          "skills": ["power"],
           "notes": [
             "Power is how fast energy is transferred: P = ΔE/Δt on average.",
             "At an instant, P = Fv for a force along the velocity."
@@ -1617,9 +1967,7 @@
         {
           "id": "4_1_momentum_and_impulse",
           "title": "4.1–4.2 Linear Momentum, Change in Momentum and Impulse",
-          "skills": [
-            "momentum_impulse"
-          ],
+          "skills": ["momentum_impulse"],
           "notes": [
             "Momentum is p = mv, a vector: its sign shows its direction.",
             "Impulse is J = ∫F dt, the area under a force-time graph, and it equals the change in momentum, Δp."
@@ -1628,9 +1976,7 @@
         {
           "id": "4_3_conservation_of_momentum",
           "title": "4.3 Conservation of Linear Momentum",
-          "skills": [
-            "momentum_conservation"
-          ],
+          "skills": ["momentum_conservation"],
           "notes": [
             "With no net outside force, a system's total momentum stays the same.",
             "Use it in collisions and explosions: total p before = total p after."
@@ -1639,10 +1985,7 @@
         {
           "id": "4_4_collisions",
           "title": "4.4 Elastic and Inelastic Collisions",
-          "skills": [
-            "collision_types",
-            "multi_stage"
-          ],
+          "skills": ["collision_types", "multi_stage"],
           "notes": [
             "Elastic: kinetic energy is also kept. Inelastic: some is lost; when objects stick, the most is lost.",
             "Split a problem into stages: momentum during the quick collision, energy before or after it."
@@ -1656,9 +1999,7 @@
         {
           "id": "6_6_orbiting_satellites",
           "title": "6.6 Motion of Orbiting Satellites",
-          "skills": [
-            "gravitational_energy"
-          ],
+          "skills": ["gravitational_energy"],
           "notes": [
             "Far from Earth, gravitational potential energy is U = −GMm/r, zero infinitely far away.",
             "An object escapes if its total energy K + U is zero or more: v_escape = √(2GM/r)."

@@ -142,8 +142,10 @@ but a miss still steps down to a weak prerequisite, and skills outside the lesso
 the usual readiness rule. A follow-up already right once since its miss stops jumping
 the queue until WATCH_LATER_HOURS after the miss, when a right answer can clear it;
 more follow-ups minutes later are massed practice. A problem answered in the last
-REPEAT_HOURS hours is never offered: when nothing fresh is left on the lesson, it is
-done for today, instead of drifting into other lessons. next_problems with `focus`
+REPEAT_HOURS hours is not offered again, unless it is a template, whose numbers change:
+then it may come back, but never twice in a row (decided 2026-11-27: a skill comes
+back as a new version, never the exact same problem). When nothing fresh is left on
+the lesson, it is done for today, instead of drifting into other lessons. next_problems with `focus`
 puts the lesson's skills first within each rule, for a batch.
 
 When no problem fits a skill, the rules are loosened for that skill in this order:
@@ -179,7 +181,7 @@ from practice_engine.mastery import (
     step_table,
     update_mastery,
 )
-from practice_engine.models import Course, MasteryState, Problem, StepAnswer
+from practice_engine.models import Course, MasteryState, Problem, StepAnswer, is_template
 
 # The numbers behind the rules, set by hand. T6's simulated students are where we test them.
 
@@ -237,6 +239,8 @@ class MissedStep(BaseModel):
 
     problem_id: str
     step_position: int  # counting from 1, like the rest of the engine
+    # Which version of a template problem it was, so the page can show its numbers.
+    variant: int | None = None
 
 
 class Pick(BaseModel):
@@ -471,11 +475,16 @@ def next_problem(
     history: list[StepAnswer],
     now: datetime,
     focus: set[str] | None = None,
+    taught: set[str] | None = None,
 ) -> Pick | None:
     """The one next problem for a student practicing one lesson, whose skills are
     `focus` (None: the whole course), or None when nothing fresh is left today (see
     "Practicing one lesson" at the top). Never a problem answered in the last
-    REPEAT_HOURS hours. Stops with a ValueError as next_problems does."""
+    REPEAT_HOURS hours, unless it is a template (new numbers), and then never the
+    problem just answered. `taught`, if given, is the skills taught so far (this
+    lesson's and the earlier lessons', in curriculum order): a problem with a step on
+    any other skill comes after one without, so a follow-up never lands in a topic
+    the student has not met. Stops with a ValueError as next_problems does."""
     history, skill_of_step = _own_history(course, state, history, now)
     if focus is not None:
         # A lesson of only skills used everywhere keeps them; otherwise they go.
@@ -484,17 +493,28 @@ def next_problem(
         picks = _starting_check(course, state, 1, focus)
         return picks[0] if picks else None
     selector = _Selector(course, state, history, now, skill_of_step, focus)
+    if taught is not None:
+        selector.taught = set(taught) | selector.everywhere
 
     def on_lesson(target: _Target) -> bool:
         return focus is None or target.skill in focus
 
+    # A problem answered in the last day is not offered again, unless it is a template:
+    # then it comes back with new numbers, but never twice in a row.
+    stale = {
+        problem_id
+        for problem_id in selector.recent
+        if not is_template(selector.problem_by_id[problem_id])
+        or problem_id == selector.last_problem.id
+    }
+
     def first_fresh(targets: list[_Target]) -> Pick | None:
-        """A pick for the first target with a problem not answered in the last day. A
-        follow-up or a stuck skill's easiest problem looks for solid (a success soon
-        after a miss helps it stick); the rest look for stretch."""
+        """A pick for the first target with a problem that is not stale. A follow-up
+        or a stuck skill's easiest problem looks for solid (a success soon after a
+        miss helps it stick); the rest look for stretch."""
         for target in targets:
             challenge: Challenge = "solid" if target.missed_step or target.easiest else "stretch"
-            problem = selector.best_problem(target, [], challenge, exclude=selector.recent)
+            problem = selector.best_problem(target, [], challenge, exclude=stale)
             if problem is not None:
                 return _make_pick(target, problem, challenge, selector.success(problem))
         return None
@@ -618,6 +638,8 @@ class _Selector:
     ) -> None:
         self.course = course
         self.focus = focus  # the skills of the lesson being practiced, or None
+        # The skills taught so far, when practicing a lesson (see next_problem), or None.
+        self.taught: set[str] | None = None
         self.state = state
         self.now = now
         self.skill_of_step = skill_of_step
@@ -762,7 +784,9 @@ class _Selector:
         """The follow-up for one missed (or hinted) step. `taken` is the skills earlier
         follow-ups already target; `rights_since` is how many different problems the
         skill has been right in since (see watch_list)."""
-        missed = MissedStep(problem_id=answer.problem_id, step_position=answer.step_position)
+        missed = MissedStep(
+            problem_id=answer.problem_id, step_position=answer.step_position, variant=answer.variant
+        )
         title = self.problem_by_id[answer.problem_id].title
         what = "needed a hint on" if right_after_hint(answer) else "missed"
         where = (
@@ -1077,6 +1101,9 @@ class _Selector:
     ) -> tuple:
         """How well a problem fits; smaller is better. Compared item by item:
 
+        0. when practicing a lesson, a problem with no step on a skill not taught
+           yet first (see next_problem): a new version of a template from this
+           lesson beats a fresh problem from a topic the student has not met;
         1. not answered in the last 24 hours first;
         2. never seen (no step of it ever answered) first: practice on a new problem
            makes the student recall the skill, not the answer they remember. This comes
@@ -1114,8 +1141,14 @@ class _Selector:
             self.families_of_problem[problem.id] & self.families_of_problem[previous.id]
         )
         left = -self.left_to_learn(problem, target_skill)
+        # Practicing a lesson: a problem with a step on a skill not taught yet comes
+        # after one without (always False otherwise, so it changes nothing).
+        untaught = self.taught is not None and any(
+            step.skill not in self.taught for step in problem.steps
+        )
         if challenge == "solid":
             return (
+                untaught,
                 problem.id in self.recent,
                 problem.id in self.seen,
                 success < SUCCESS_FLOOR,
@@ -1128,6 +1161,7 @@ class _Selector:
                 same_family,
             )
         return (
+            untaught,
             problem.id in self.recent,
             problem.id in self.seen,
             success < SUCCESS_FLOOR,

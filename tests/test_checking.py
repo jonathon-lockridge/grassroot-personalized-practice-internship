@@ -1,16 +1,13 @@
 """Checks for saying whether a student's answer to a step is right (step T1c)."""
 
-from pathlib import Path
-
 import pytest
+
+# The course file, found from this test file's own location (see test_models.py).
+# The physics course with push_cart's numbers frozen (see plain_course.py).
+from plain_course import COURSE
 
 from practice_engine.checking import can_read, check_answer
 from practice_engine.models import Step, load_course
-
-# The course file, found from this test file's own location (see test_models.py).
-COURSE = (
-    Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
-)
 
 
 def real_step(problem_id: str, position: int) -> Step:
@@ -37,10 +34,10 @@ def test_choice_right_and_wrong() -> None:
 
 
 def test_number_right_and_wrong() -> None:
-    step = real_step("drag_crate", 4)  # answer: -240, no tolerance
+    step = real_step("energy_curve", 3)  # answer: -18, no tolerance
 
-    assert check_answer(step, -240)
-    assert not check_answer(step, 240)  # the sign matters
+    assert check_answer(step, -18)
+    assert not check_answer(step, 18)  # the sign matters
 
 
 def test_order_right_and_wrong() -> None:
@@ -82,10 +79,10 @@ def test_number_typed_as_text_with_spaces() -> None:
 
 
 def test_negative_number_typed_as_text() -> None:
-    step = real_step("drag_crate", 4)  # answer: -240
+    step = real_step("energy_curve", 3)  # answer: -18
 
-    assert check_answer(step, "-240")
-    assert not check_answer(step, "240")
+    assert check_answer(step, "-18")
+    assert not check_answer(step, "18")
 
 
 @pytest.mark.parametrize("given", [5.43, 5.53, "5.43", "5.53"])
@@ -127,11 +124,11 @@ def test_number_wrong_sort_of_answer_is_wrong(given: object) -> None:
 
 
 def test_typographic_minus_is_a_minus() -> None:
-    step = real_step("drag_crate", 4)  # answer: -240
+    step = real_step("energy_curve", 3)  # answer: -18
 
-    assert check_answer(step, "\u2212240")  # "−240", as phones and pasted text write it
-    assert check_answer(step, " \u2212240 ")
-    assert not check_answer(step, "240")
+    assert check_answer(step, "\u221218")  # "−18", as phones and pasted text write it
+    assert check_answer(step, " \u221218 ")
+    assert not check_answer(step, "18")
 
 
 @pytest.mark.parametrize(

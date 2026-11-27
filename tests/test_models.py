@@ -5,25 +5,35 @@ from pathlib import Path
 
 import pytest
 
-from practice_engine.models import Course, load_course, validate_course
+# The real course file, and a copy with push_cart's numbers frozen, so the rule
+# checks below can break an ordinary problem (see plain_course.py).
+from plain_course import COURSE, REAL_COURSE
 
-# The course file, found from this test file's own location: parents[1] is two folders
-# up (out of tests/ to the project root), then data/ap-physics-c-energy-momentum/course.json.
-COURSE = (
-    Path(__file__).resolve().parents[1] / "data" / "ap-physics-c-energy-momentum" / "course.json"
+from practice_engine.models import (
+    Course,
+    NumberRange,
+    fill_problem,
+    is_template,
+    load_course,
+    validate_course,
 )
 
 
 def test_physics_course_is_full_size_and_sound() -> None:
-    course = load_course(COURSE)
+    course = load_course(REAL_COURSE)
 
     assert len(course.skills) >= 8
     assert len(course.problems) >= 10
     kinds_used = {step.kind for problem in course.problems for step in problem.steps}
-    assert kinds_used == {"choice", "number", "order"}
+    assert kinds_used == {"choice", "number", "order", "expression"}
     # Every difficulty is used, so the engine can move a student up or down.
     assert {problem.difficulty for problem in course.problems} == {1, 2, 3}
     assert validate_course(course) == []
+
+
+def spring_launch(course: Course):
+    """Problem spring_launch, whose step 2 puts items in order."""
+    return next(problem for problem in course.problems if problem.id == "spring_launch")
 
 
 # The three broken copies that TODO T1a names.
@@ -131,12 +141,12 @@ OTHER_BREAKAGES = [
     ),
     (
         "one item to order",
-        lambda c: setattr(c.problems[3].steps[1], "answer", ["only one"]),
+        lambda c: setattr(spring_launch(c).steps[1], "answer", ["only one"]),
         "at least 2 items",
     ),
     (
         "repeated item to order",
-        lambda c: setattr(c.problems[3].steps[1], "answer", ["Same", "same"]),
+        lambda c: setattr(spring_launch(c).steps[1], "answer", ["Same", "same"]),
         "more than once",
     ),
     ("empty problem title", lambda c: setattr(c.problems[0], "title", " "), "empty title"),
@@ -249,7 +259,7 @@ def test_a_course_can_also_be_built_in_code() -> None:
 
 
 def test_physics_course_lessons_follow_the_curriculum() -> None:
-    course = load_course(COURSE)
+    course = load_course(REAL_COURSE)
     lesson_of = {
         skill: lesson.title
         for unit in course.units
@@ -304,3 +314,98 @@ def test_lesson_rules_are_enforced(name: str, break_course, expected_words: str)
     complaints = validate_course(course)
 
     assert any(expected_words in complaint for complaint in complaints), (name, complaints)
+
+
+# Templates (decided 2026-11-27): numbers change from one variant to the next.
+
+
+def work_problem(course: Course, problem_id: str = "drag_crate"):
+    return next(problem for problem in course.problems if problem.id == problem_id)
+
+
+def test_a_template_is_filled_in_the_same_way_for_the_same_variant() -> None:
+    problem = work_problem(load_course(COURSE))
+
+    first, again, other = (
+        fill_problem(problem, 7),
+        fill_problem(problem, 7),
+        fill_problem(problem, 8),
+    )
+
+    assert is_template(problem)
+    assert first == again
+    assert "{" not in first.prompt and "{" not in first.steps[2].prompt
+    assert isinstance(first.steps[2].answer, float) and first.steps[2].tolerance > 0
+    assert (first.prompt, first.steps[2].answer) != (other.prompt, other.steps[2].answer)
+
+
+def test_the_work_lesson_problems_are_templates_at_ap_level() -> None:
+    course = load_course(REAL_COURSE)
+    lesson = next(x for u in course.units for x in u.lessons if x.id == "3_2_work")
+    problems = [p for p in course.problems if {s.skill for s in p.steps} & set(lesson.skills)]
+    kinds = {s.kind for p in problems if is_template(p) for s in p.steps}
+
+    assert sum(is_template(p) for p in problems) >= 4
+    assert "expression" in kinds  # "derive an expression", as AP questions ask
+    assert any(p.graph is not None for p in problems)  # reading a graph
+
+
+def test_a_drag_crate_variant_has_physically_sound_numbers() -> None:
+    problem = work_problem(load_course(COURSE))
+    for variant in range(1, 200):
+        filled = fill_problem(problem, variant)
+        rope, friction, speed = (
+            filled.steps[2].answer,
+            filled.steps[5].answer,
+            filled.steps[7].answer,
+        )
+        assert rope > -friction > 0  # it starts moving, and friction takes away energy
+        assert speed > 0
+
+
+@pytest.mark.parametrize(
+    ("name", "change", "expected_words"),
+    [
+        ("missing number", lambda p: p.values.update({"oops": "nope*2"}), "variant 1"),
+        ("bad range", lambda p: setattr(p.numbers["m"], "step", 0), "step above 0"),
+        ("unknown blank", lambda p: setattr(p, "prompt", "A {nope} kg box"), "no value"),
+        ("bad formula answer", lambda p: setattr(p.steps[1], "answer", "m*g -"), "cannot be read"),
+        ("unused symbol", lambda p: p.steps[1].symbols.append("d"), "not in the answer"),
+        (
+            "symbols on a number step",
+            lambda p: setattr(p.steps[2], "symbols", ["m"]),
+            "only 'expression'",
+        ),
+    ],
+)
+def test_template_rules_are_enforced(name: str, change, expected_words: str) -> None:
+    course = load_course(COURSE)
+    change(work_problem(course))
+
+    complaints = validate_course(course)
+
+    assert any(expected_words in complaint for complaint in complaints), (name, complaints)
+
+
+def test_a_blank_in_an_ordinary_problem_is_reported() -> None:
+    course = load_course(COURSE)
+    course.problems[0].prompt = "A {m} kg cart"
+
+    assert any("{blank}" in complaint for complaint in validate_course(course))
+
+
+def test_every_variant_a_student_can_get_is_checked() -> None:
+    course = load_course(COURSE)
+    problem = work_problem(course)
+    problem.numbers["zz"] = NumberRange(start=1, stop=2, step=1)
+    problem.values["bad"] = "1/(zz - 2)"  # fails in about half the variants, not variant 1
+
+    assert any("variant" in complaint for complaint in validate_course(course))
+
+
+def test_an_answer_formula_that_cannot_be_worked_out_is_reported() -> None:
+    course = load_course(COURSE)
+    step = work_problem(course).steps[1]
+    step.answer = "sqrt(-m*g - F*sin(theta))"  # never a real number for positive values
+
+    assert any("cannot be worked out" in complaint for complaint in validate_course(course))
